@@ -21,6 +21,7 @@ import yaml
 from . import dedup, store
 from .eligibility import judge
 from .models import Area, Event, Notice
+from .rules import RULES_VERSION
 from .sources import applyhome_cal, applyhome_detail, lh, registry, sh, youth
 from .util import new_client, parse_date, today_kst
 
@@ -311,6 +312,7 @@ def build_view(prof: dict, today: Optional[date] = None,
                        "revised": []},
             "stats": {}, "sources": overview, "calendar": [], "facets": {},
             "baselines": {}, "runs": 0, "warnings": [],
+            "rules_version": RULES_VERSION,
         }
 
     seen = store.load_seen()
@@ -388,6 +390,8 @@ def build_view(prof: dict, today: Optional[date] = None,
         "fetched_at": cached.get("fetched_at"),
         "warnings": cached.get("warnings") or [],
         "today": stamp,
+        # 어떤 규칙 판본으로 판정했는지 — CLI·화면·테스트가 같은 값을 본다
+        "rules_version": RULES_VERSION,
         # 수집원별로 언제 기준선을 잡았는지 — '신규'의 기준을 화면에 설명하기 위해
         "baselines": seen_info.get("baselines") or {},
         "runs": seen_info.get("runs", 0),
