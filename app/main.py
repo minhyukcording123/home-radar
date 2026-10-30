@@ -181,11 +181,39 @@ def _lh_detail(raw: dict) -> dict:
     """
     supply = (raw.get("extra") or {}).get("supply") or {}
     rows = supply.get("rows") or []
+
+    # 상세 API 가 미승인이면 주소·세대수가 비어 있다. 그럴 때는 공급정보에서
+    # 끌어와 요약을 채운다 — 단지명/호별 주소와 세대수 합계는 거기 있다.
+    location = raw.get("address") or ""
+    if not location and rows:
+        names = []
+        for r in rows:
+            nm = r.get("complex") or r.get("address") or ""
+            if nm and nm not in names:
+                names.append(nm)
+        if names:
+            location = names[0] if len(names) == 1 else \
+                f"{names[0]} 외 {len(names) - 1}곳"
+
+    total_units = raw.get("households") or ""
+    if not total_units and rows:
+        nums = [r["units"] for r in rows if isinstance(r.get("units"), int)]
+        if nums:
+            total_units = f"{sum(nums):,}세대 (공급정보 합계)"
+        elif any(r.get("address") for r in rows):
+            # 매입임대는 세대수 대신 호별 목록으로 온다 — 행 수가 곧 호수다
+            total_units = f"{len(rows):,}호 (공급정보 목록)"
+
     return {
         "source": raw.get("source"),
         "available": bool(rows),
-        "location": raw.get("address", ""),
-        "total_units": raw.get("households", ""),
+        "location": location,
+        "total_units": total_units,
+        "posted": raw.get("posted") or "",
+        "announce": raw.get("announce") or "",
+        "begin": raw.get("begin") or "",
+        "end": raw.get("end") or "",
+        "status": raw.get("status") or "",
         "price": raw.get("price", ""),
         "price_min": raw.get("price_min"),
         "price_max": raw.get("price_max"),

@@ -424,6 +424,18 @@ legend{font-size:12px;color:var(--dim);font-weight:700;padding:0 4px}
 .dt-note.warn{background:var(--warn-bg);border-color:var(--warn-line);color:var(--warn)}
 .dt-asof{margin-top:10px;font-size:11px;color:var(--faint)}
 
+/* LH 공급정보 표 — 단지별 그룹 / 숫자 우측 정렬 / 합계·미제공 안내 */
+.dt-sub{font-size:12.5px;color:var(--dim);font-weight:600;margin:-3px 0 7px}
+.dt-grp{font-size:12.5px;font-weight:700;color:var(--ink);margin:12px 0 6px}
+.dt-grp .c{color:var(--faint);font-weight:600;font-size:11.5px}
+.dtable th.num,.dtable td.num{text-align:right}
+.dtable td.num{font-variant-numeric:tabular-nums;white-space:nowrap}
+.dtable .dim2{color:var(--faint);font-size:11.5px;font-weight:400}
+.dt-sum{margin-top:8px;font-size:12px;color:var(--dim)}
+.dt-sum b{color:var(--ink)}
+.dt-miss{margin-top:5px;font-size:11.5px;color:var(--faint)}
+.dt-more{margin-top:8px}
+
 /* ---------- 토스트 ---------- */
 .toast{position:fixed;left:50%;transform:translateX(-50%);
   bottom:calc(20px + var(--safe));background:#15181d;color:#fff;padding:11px 18px;
@@ -632,11 +644,20 @@ html[data-theme="dark"] .toast{background:#e8ecf1;color:#15181d}
             <input type="number" name="debts" min="0"></label>
           <label class="f"><span>자동차가액 (만원)</span>
             <input type="number" name="car" min="0"></label>
+          <label class="f"><span>부동산가액 (만원)</span>
+            <input type="number" name="real_estate" min="0"
+              placeholder="없으면 0"></label>
         </div>
         <div class="calc" id="calc"></div>
         <div class="hint">
           공공 유형은 <b>총자산·자동차가액 상한</b>이 있습니다.
           순자산은 총자산에서 부채를 뺀 값으로 봅니다.
+          <br><br>
+          <b>특별공급과 뉴:홈 일반형은 총자산이 아니라 부동산가액만 봅니다</b>
+          (2026년 2억 1,550만원). 부동산가액을 적으면 그 값으로 바로 판정하고,
+          비워 두면 '총자산 전체가 한도 이하'일 때만 충족으로 봅니다 —
+          <b>부동산이 없으면 0을 적어 주세요.</b>
+          <br><br>
           부동산가액만 따로 보는 기준(특별공급·뉴:홈)은 총자산이 한도 이하일 때만
           충족으로 확정하고, 그 밖에는 <b>'확인 필요'</b>로 남깁니다.
         </div>
@@ -729,7 +750,23 @@ function won(m){
   if (eok) return `${sg}${eok}억원`;
   return `${sg}${rest.toLocaleString()}만원`;
 }
-/* price_min / price_max 숫자에서 금액 문구를 만든다 */
+/* 원 단위 금액 → '3,778만원' / '4억 747만 1,000원'.
+   won() 은 **만원** 입력 전용이라 LH supply_rows 의 원 단위 금액을 그대로 넣으면
+   1만 배 커진다 (3,778만원 → 3조). 원 단위는 반드시 이 함수로 포맷한다. */
+function wonRaw(v){
+  if (v === null || v === undefined || v === '') return '';
+  const n = Math.round(Number(v));
+  if (!isFinite(n)) return '';
+  if (n === 0) return '0원';
+  const sg = n < 0 ? '-' : '', a = Math.abs(n);
+  const eok = Math.floor(a / 1e8), man = Math.floor((a % 1e8) / 1e4), rest = a % 1e4;
+  const parts = [];
+  if (eok) parts.push(`${eok.toLocaleString()}억`);
+  if (man) parts.push(`${man.toLocaleString()}만`);
+  if (rest) parts.push(rest.toLocaleString());
+  return sg + parts.join(' ') + '원';
+}
+/* price_min / price_max 숫자에서 금액 문구를 만든다 (만원 단위 입력) */
 function fmtPriceOf(o){
   if (!o) return '';
   if (o.price_min != null){
@@ -1117,18 +1154,146 @@ function card(r){
 }
 
 /* ================= 공고 상세 (모달) =================
-   청약홈 공고는 /api/detail 로 상세를 가져오고,
-   LH 공급정보 표가 들어오면 같은 자리에 표가 추가된다. */
-function detailParams(r){
-  return (r.house_manage_no && r.pblanc_no)
-    ? { house_manage_no: r.house_manage_no, pblanc_no: r.pblanc_no,
-        house_secd: r.house_secd || '01' }
-    : null;
+   모든 수집원을 /api/detail?key=<row.key> 로 부른다 — 서버가 수집원에 맞는
+   경로를 고른다 (청약홈 구버전 파라미터 호출은 더 이상 쓰지 않는다).
+
+   금액 단위 주의 —
+   · price_min / price_max : **만원** → won() 으로 포맷
+   · supply_rows 의 deposit / rent / price : **원** → wonRaw() 로 포맷
+   둘을 섞으면 1만 배 틀린 금액이 화면에 뜬다. */
+
+/* supply_rows 항목 이름 → 한국어 라벨 (열 머리글과 '미제공' 안내에 함께 쓴다) */
+const SUPPLY_LABEL = {
+  complex:'단지', house_type:'주택형', exclusive_area:'전용면적(㎡)',
+  supply_area:'공급면적(㎡)', units:'세대수', total_units:'총 세대수',
+  deposit:'보증금', rent:'월임대료', price:'분양가', address:'주소', floor:'층',
+};
+const MONEY_COLS = new Set(['deposit','rent','price']);
+const AREA_COLS = new Set(['exclusive_area','supply_area']);
+const SUPPLY_LIMIT = 10;   // 매입임대는 50행 넘게 온다 — 기본은 10행만 보이고 '더 보기'
+
+function supplyCell(s, c){
+  if (MONEY_COLS.has(c)){
+    // 숫자면 원 → 억/만원(wonRaw). 숫자가 아니면 *_raw 원문("공고문 참조")을
+    // 그대로 보여준다 — 0 으로 채우면 '보증금 0원'이라는 거짓이 된다.
+    if (typeof s[c] === 'number') return `<td class="num">${wonRaw(s[c])}</td>`;
+    const raw = s[c + '_raw'];
+    return raw ? `<td>${esc(raw)}</td>` : '<td class="num">—</td>';
+  }
+  if (AREA_COLS.has(c)){
+    const v = s[c];
+    if (v === null || v === undefined || v === '') return '<td class="num">—</td>';
+    return `<td class="num">${(Math.round(Number(v)*100)/100).toLocaleString()}</td>`;
+  }
+  if (c === 'units'){
+    // units 0 은 유효한 값(예비입주자 모집) — falsy 체크로 지우면 안 된다
+    if (s.units === null || s.units === undefined) return '<td class="num">—</td>';
+    let t = Number(s.units).toLocaleString();
+    // '이번 공급 / 주택형 전체' — 42 / 46 처럼 비율을 가늠할 수 있게
+    if (s.total_units !== null && s.total_units !== undefined && s.total_units !== s.units)
+      t += ` <span class="dim2">/ ${Number(s.total_units).toLocaleString()}</span>`;
+    return `<td class="num">${t}</td>`;
+  }
+  const v = s[c];
+  return `<td>${(v === null || v === undefined || v === '') ? '—' : esc(String(v))}</td>`;
 }
 
-function detailHTML(r, d, mode){
-  // mode: 'loading' | 'ok' | 'error' | 'none'(수집원이 상세 미제공)
+function supplySection(d, open){
+  // LH 응답만 supply_rows 배열을 갖는다 — 없으면(청약홈 등) 이 섹션 자체가 없다
+  if (!d || !Array.isArray(d.supply_rows)) return '';
+  const rows = d.supply_rows;
+  if (!rows.length)
+    return `<h3 class="dt-h">공급정보</h3>
+      <div class="dt-note">이 공고는 공급정보가 제공되지 않습니다 — 공고문에서 확인하세요.</div>`;
+
+  const avail = d.supply_available || [];
+  const maeip = avail.includes('address');   // 매입임대: 주택형 대신 호별(주소·층)
+
+  // 열은 실제 제공되는 항목만 — 분양은 분양가만, 임대는 보증금·월임대료만 온다.
+  // supply_available 에 없는 열을 만들면 '—'만 가득한 빈 열이 된다.
+  const cols = maeip
+    ? ['address','floor','exclusive_area']
+    : ['house_type','exclusive_area','supply_area','units','deposit','rent','price']
+        .filter(c => avail.includes(c));
+  const hasTotals = !maeip && avail.includes('total_units');
+  const head = cols.map(c => {
+    const num = MONEY_COLS.has(c) || AREA_COLS.has(c) || c === 'units';
+    const lab = (c === 'units' && hasTotals) ? '세대수 (이번/전체)' : SUPPLY_LABEL[c];
+    return `<th scope="col"${num ? ' class="num"' : ''}>${lab}</th>`;
+  }).join('');
+
+  // 단지별 그룹 — 단지가 1곳이면 묶지 않고 제목 줄에 단지명만 쓴다
+  const groups = [];
+  for (const s of rows){
+    const k = s.complex || '';
+    let g = groups.find(x => x.name === k);
+    if (!g){ g = { name: k, rows: [] }; groups.push(g); }
+    g.rows.push(s);
+  }
+  // 전용면적 오름차순 — 면적↔세대수·금액을 나란히 비교해 보기 쉽게
+  for (const g of groups)
+    g.rows.sort((a,b) => (Number(a.exclusive_area)||0) - (Number(b.exclusive_area)||0));
+
+  const single = groups.length === 1;
+  const tableOf = list =>
+    `<div class="dt-scroll"><table class="dtable">
+      <thead><tr>${head}</tr></thead>
+      <tbody>${list.map(s =>
+        `<tr>${cols.map(c => supplyCell(s, c)).join('')}</tr>`).join('')}</tbody>
+    </table></div>`;
+
+  let budget = open ? rows.length : SUPPLY_LIMIT, shown = 0, body = '';
+  for (const g of groups){
+    if (budget <= 0) break;
+    const take = g.rows.slice(0, budget);
+    budget -= take.length; shown += take.length;
+    body += single ? tableOf(take)
+      : `<h4 class="dt-grp">${esc(g.name || '단지 미표기')} <span class="c">${
+          g.rows.length}${maeip ? '호' : '개 주택형'}</span></h4>${tableOf(take)}`;
+  }
+  const hidden = rows.length - shown;
+  const more = hidden > 0
+    ? `<div class="dt-more"><button class="btn slim" data-act="supply-more">${hidden}개 더 보기</button></div>`
+    : '';
+
+  // 요약: 세대수 합계(또는 호 수) — 표만 보고 공급 규모를 가늠할 수 있게
+  const sumParts = [];
+  if (maeip) sumParts.push(`총 <b>${rows.length.toLocaleString()}호</b>`);
+  else if (avail.includes('units')){
+    const n = rows.reduce((t,s) => t + (typeof s.units === 'number' ? s.units : 0), 0);
+    sumParts.push(`이번 공급 총 <b>${n.toLocaleString()}세대</b>`);
+  }
+  sumParts.push('전용면적 오름차순');
+  if (cols.some(c => MONEY_COLS.has(c)))
+    sumParts.push(`금액은 ${esc(d.amount_unit || '원')} 단위를 억/만원으로 표시`);
+  const sumLine = `<div class="dt-sum">${sumParts.join(' · ')}</div>`;
+
+  // 제공되지 않는 항목 안내 — 열을 숨긴 이유를 남긴다.
+  // 주소·층은 매입임대 전용 항목이고, 호별 목록에서 주택형·면적·세대수는
+  // 의도적으로 없는 구조라 '미제공'으로 적으면 오해를 부른다 → 변형별로 줄인다.
+  const missShow = maeip
+    ? ['deposit','rent','price']
+    : ['house_type','supply_area','units','total_units','deposit','rent','price'];
+  const miss = (d.supply_missing || []).filter(c => missShow.includes(c))
+    .map(c => (SUPPLY_LABEL[c] || c).replace(/\(.*\)/, ''));
+  const missLine = miss.length
+    ? `<div class="dt-miss">제공되지 않는 항목: ${miss.join(', ')} — 공고문에서 확인하세요</div>`
+    : '';
+
+  const title = maeip ? '공급정보 — 호별 목록' : '공급정보 (단지·주택형별)';
+  const sub = (single && groups[0].name)
+    ? `<div class="dt-sub">${esc(groups[0].name)}</div>` : '';
+  return `<h3 class="dt-h">${title}</h3>${sub}${body}${more}${sumLine}${missLine}`;
+}
+
+function detailHTML(r, d, mode, supplyOpen){
+  // mode: 'loading' | 'ok' | 'error'
+  // '정보 미제공'은 세 단계로 나눠 보여준다 —
+  //  1) available:false + reason  → 수집원 자체가 상세 미제공 (이유 + 공고문 버튼)
+  //  2) supply_rows 가 빈 배열    → 이 공고만 공급정보 없음 (supplySection 안에서)
+  //  3) 특정 항목만 없음          → 열을 숨기고 supply_missing 을 아래에 표기
   const src = d || {};
+  const unavailable = mode === 'ok' && d && d.available === false;
   const kv = [];
   const push = (k, val) => { if (val) kv.push(
     `<dt>${k}</dt><dd>${esc(val)}</dd>`); };
@@ -1136,27 +1301,47 @@ function detailHTML(r, d, mode){
   push('규모', src.total_units || r.households);
   push('공급금액', fmtPriceOf(d && d.price_min != null ? d : r));
   push('모집공고일', src.posted || r.posted);
+  // 접수 기간 — LH 상세엔 일정이 없으므로 목록 카드의 날짜(row.begin/end)를 그대로 쓴다
+  const begin = src.begin || r.begin, end = src.end || r.end;
+  if (begin || end){
+    let t = [begin, end].filter(Boolean).join(' ~ ');
+    if (!r.closed && r.days_left !== null && r.days_left !== undefined && r.days_left >= 0)
+      t += r.days_left === 0 ? ' · 오늘 마감' : ` · 마감 D-${r.days_left}`;
+    push('접수 기간', t);
+  }
   push('당첨자 발표', src.announce || r.announce);
   push('입주 예정', src.move_in || r.move_in);
   push('문의', src.phone || r.phone);
 
+  const supply = (mode === 'ok' && !unavailable) ? supplySection(d, supplyOpen) : '';
+
+  // LH 공급정보 표가 있으면 옛 주택형 요약표는 중복이라 생략한다
   const areas = (d && (d.areas||[]).length) ? d.areas : (r.areas || []);
-  const areaTable = areas.length ? `
+  const areaTable = (!supply && areas.length) ? `
     <h3 class="dt-h">공급 대상 (주택형별)</h3>
     <div class="dt-scroll"><table class="dtable">
-      <thead><tr><th>주택형</th><th>전용면적(㎡)</th><th>세대수</th></tr></thead>
-      <tbody>${areas.map(a => `<tr><td>${esc(a.name)}</td><td>${esc(a.exclusive)}</td><td>${esc(a.units)}</td></tr>`).join('')}</tbody>
+      <thead><tr><th scope="col">주택형</th><th scope="col" class="num">전용면적(㎡)</th><th scope="col" class="num">세대수</th></tr></thead>
+      <tbody>${areas.map(a => `<tr><td>${esc(a.name) || '—'}</td><td class="num">${esc(a.exclusive) || '—'}</td><td class="num">${esc(a.units) || '—'}</td></tr>`).join('')}</tbody>
     </table></div>` : '';
 
   const recs = (d && d.receptions) || [];
-  const recTable = recs.length ? `
+  let recHtml = '';
+  if (recs.length){
+    recHtml = `
     <h3 class="dt-h">접수 일정</h3>
     <div class="dt-scroll"><table class="dtable">
-      <thead><tr><th>구분</th><th>기간</th></tr></thead>
+      <thead><tr><th scope="col">구분</th><th scope="col">기간</th></tr></thead>
       <tbody>${recs.map(x => (x.periods||[]).map((p,i) =>
         `<tr>${i===0 ? `<td rowspan="${x.periods.length}">${esc(x.type)}</td>` : ''}
          <td>${esc(p.text || ((p.begin||'') + ' ~ ' + (p.end||'')))}</td></tr>`).join('')).join('')}</tbody>
-    </table></div>` : '';
+    </table></div>`;
+  } else if (mode === 'ok' && !unavailable && r.source_id === 'lh'){
+    // LH 상세 API(일정 포함)는 승인 대기 — 빈 표 대신 이유를 말해 준다
+    recHtml = `
+    <h3 class="dt-h">접수 일정</h3>
+    <div class="dt-note">접수 일정은 LH 상세 API 승인 후 표시됩니다 —
+      위 접수 기간(마감일)과 공고문에서 확인하세요.</div>`;
+  }
 
   const docUrl = (d && d.doc_url) || r.doc_url;
   const links = [
@@ -1169,35 +1354,44 @@ function detailHTML(r, d, mode){
     note = `<div class="dt-note">상세 정보를 불러오는 중…</div>`;
   else if (mode === 'error')
     note = `<div class="dt-note warn">상세 정보를 불러오지 못했습니다. 아래 공고문 링크로 직접 확인하세요.</div>`;
-  else if (mode === 'none')
-    note = `<div class="dt-note">이 수집원은 공급정보 표를 아직 제공하지 않습니다 (정보 미제공). 공고문·신청 페이지에서 확인하세요.</div>`;
-  else if (!areaTable && !recTable && !kv.length)
+  else if (unavailable)
+    // 수집원 자체가 상세 미제공 — 서버가 준 이유를 그대로 보여주고 공고문으로 보낸다
+    note = `<div class="dt-note">${esc(d.reason ||
+      '이 수집원은 상세 정보를 제공하지 않습니다 (정보 미제공).')}${
+      docUrl ? '<br>아래 모집공고문 버튼에서 직접 확인하세요.' : ''}</div>`;
+  else if (mode === 'ok' && !supply && !areaTable && !recHtml && !kv.length)
     note = `<div class="dt-note">정보 미제공 — 공고문에서 확인하세요.</div>`;
 
   return `${note}
     ${kv.length ? `<dl class="dt-kv">${kv.join('')}</dl>` : ''}
-    ${areaTable}${recTable}
+    ${supply}${areaTable}${recHtml}
     ${(d && d.cached_at) ? `<div class="dt-asof">캐시 ${esc(String(d.cached_at).replace('T',' ').slice(0,16))}</div>` : ''}
     ${links ? `<div class="links" style="margin-top:14px">${links}</div>` : ''}`;
+}
+
+/* 열린 상세의 상태 — '더 보기'가 다시 그릴 때 쓴다 */
+let DT_CTX = null;
+function renderDetail(){
+  if (!DT_CTX) return;
+  $('#dt-body').innerHTML = detailHTML(DT_CTX.r, DT_CTX.d, DT_CTX.mode, DT_CTX.supplyOpen);
 }
 
 async function openDetail(key){
   const r = allRows().find(x => x.key === key);
   if (!r) return;
   $('#dt-title').textContent = r.title;
-  const p = detailParams(r);
-  $('#dt-body').innerHTML = detailHTML(r, null, p ? 'loading' : 'none');
+  DT_CTX = { r, d: null, mode: 'loading', supplyOpen: false };
+  renderDetail();
   $('#dlg-detail').showModal();
-  if (!p) return;
   try{
-    const q = new URLSearchParams(p).toString();
-    const res = await fetch('/api/detail?' + q);
+    const res = await fetch('/api/detail?key=' + encodeURIComponent(key));
     if (!res.ok) throw new Error('HTTP ' + res.status);
-    const d = await res.json();
-    $('#dt-body').innerHTML = detailHTML(r, d, 'ok');
+    DT_CTX.d = await res.json();
+    DT_CTX.mode = 'ok';
   }catch(err){
-    $('#dt-body').innerHTML = detailHTML(r, null, 'error');
+    DT_CTX.mode = 'error';
   }
+  renderDetail();
 }
 
 /* ---- 캘린더 ---- */
@@ -1352,6 +1546,11 @@ function showCalc(){
   if (inc) rows.push(['합계 (참고)', won(inc)
     + (base ? ` · 기준의 ${(inc*10000/base*100).toFixed(1)}%` : '')]);
   if (f.elements.assets.value !== '') rows.push(['순자산 (자산-부채)', won(na)]);
+  // 특별공급·뉴:홈은 총자산이 아니라 부동산가액만 본다 — 비우면 확정되지 않는다
+  if (f.elements.real_estate.value !== '')
+    rows.push(['부동산가액', won(num('real_estate'))]);
+  else if (f.elements.assets.value !== '')
+    rows.push(['특별공급 부동산 기준', '부동산가액 미입력 — 확인 필요로 남습니다']);
   // 신혼 유형은 배우자 소득이 없으면 외벌이/맞벌이 한도 사이가 확정되지 않는다
   const married = ['예비신혼', '신혼', '기혼'].includes(f.elements.marital.value);
   if (married && !spouseFilled)
@@ -1381,6 +1580,7 @@ async function saveProfile(e){
     spouse_income_work: num('spouse_income_work'),
     spouse_income_business: num('spouse_income_business'),
     assets: num('assets'), debts: num('debts') ?? 0, car: num('car') ?? 0,
+    real_estate: num('real_estate'),
     has_account: bool('has_account'), account_opened: str('account_opened'),
     account_payments: num('account_payments') ?? 0,
     account_recognized: num('account_recognized'),
@@ -1452,6 +1652,10 @@ document.addEventListener('click', async e => {
     else if (k === 'alert-off'){ ALERT = null; renderAlerts(); renderPane(); }
     else if (k === 'tab-all'){ TAB = 'all'; ALERT = null;
       renderStats(); renderAlerts(); renderPane(); }
+    else if (k === 'supply-more'){
+      // 상세 모달의 공급정보 '더 보기' — 전체 행으로 다시 그린다
+      if (DT_CTX){ DT_CTX.supplyOpen = true; renderDetail(); }
+    }
     else if (k === 'src-info')
       toast('수집원 바에 표시된 환경변수(예: LH_API_KEY)를 설정한 뒤 서버를 다시 시작하세요', 5000);
     return;
@@ -1472,7 +1676,8 @@ document.addEventListener('click', async e => {
 
 $('#pform').addEventListener('input', e => {
   if (['household_size','income_work','income_business','assets','debts',
-       'spouse_income_work','spouse_income_business','dual_income','marital']
+       'spouse_income_work','spouse_income_business','dual_income','marital',
+       'real_estate']
       .includes(e.target.name)) showCalc();
 });
 

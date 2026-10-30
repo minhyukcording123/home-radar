@@ -29,9 +29,13 @@ SOURCES: list[dict] = [
         "access": OFFICIAL_API,
         "enabled": True,          # 키가 있으면 자동으로 켜진다
         "key_env": "APPLYHOME_API_KEY",
-        "covers": "청약홈과 같은 범위를 권위 있는 값으로 보강 (주소·세대수·발표일)",
+        "covers": "APT·무순위/잔여·오피스텔/도시형·공공지원민간임대 분양정보 — "
+                  "주소·세대수·당첨발표일·공고 URL 을 권위 있는 값으로 보강",
         "robots": "해당 없음",
-        "note": "키 없이 호출하면 401. 활용신청 후 일반 인증키(Decoding)를 환경변수에 넣는다",
+        "note": "수집기 구현됨(applyhome_api.py) — 키만 넣으면 돈다. "
+                "2026-10-30 확인: 키 없이 호출하면 401 {code:-401}, "
+                "미등록 키는 401 {code:-4}. 활용신청 후 일반 인증키(Decoding)를 "
+                "APPLYHOME_API_KEY 환경변수나 .env 에 넣는다",
         "signup": "https://www.data.go.kr/data/15098547/openapi.do",
     },
     {

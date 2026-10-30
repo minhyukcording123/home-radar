@@ -10,6 +10,14 @@ sources:
     ahead_months: 6      # 앞으로 몇 개월까지
     detail_limit: 40     # 상세까지 보강할 공고 수 (접수 중/임박 우선)
 
+  # 청약홈 공식 오픈API — 공개 화면과 같은 범위를 권위 있는 값으로 보강한다.
+  # APPLYHOME_API_KEY 가 없으면 자동으로 '키 미설정' 처리된다.
+  applyhome_api:
+    enabled: true
+    lookback_days: 60    # 모집공고일 기준 과거 며칠까지
+    per_page: 300
+    max_pages: 10
+
   lh:
     enabled: true        # LH_API_KEY 가 없으면 자동으로 '키 미설정' 처리된다
     # 05 분양주택 · 06 임대주택 · 13 주거복지(매입·전세임대) · 39 신혼희망타운

@@ -22,8 +22,8 @@ from . import dedup, store
 from .eligibility import judge
 from .models import Area, Event, Notice
 from .rules import RULES_VERSION
-from .sources import (applyhome_cal, applyhome_detail, lh, lh_supply, registry,
-                      sh, youth)
+from .sources import (applyhome_api, applyhome_cal, applyhome_detail, lh,
+                      lh_supply, registry, sh, youth)
 from .util import new_client, parse_date, today_kst
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -33,6 +33,10 @@ DEFAULT_CONFIG = {
     "sources": {
         "applyhome": {"enabled": True, "back_months": 1, "ahead_months": 6,
                       "detail_limit": 40},
+        # 공식 오픈API — 키가 있으면 켜진다. 같은 청약홈 범위를 권위 있는 값으로
+        # 보강하고, 중복이면 dedup 이 공식 쪽(SOURCE_RANK 0)을 남긴다.
+        "applyhome_api": {"enabled": True, "lookback_days": 60,
+                          "per_page": 300, "max_pages": 10},
         "lh": {"enabled": True, "upp_types": ["05", "06", "13", "39"],
                "max_pages": 5, "detail_limit": 30, "supply_limit": 20},
         "sh": {"enabled": True, "pages": 3},
@@ -210,6 +214,12 @@ def refresh(today: Optional[date] = None, enrich: bool = True,
         today, back=int(ac.get("back_months", 1)),
         ahead=int(ac.get("ahead_months", 6))))
 
+    aac = source_cfg(cfg, "applyhome_api")
+    run("applyhome_api", lambda: applyhome_api.collect(
+        today, lookback_days=int(aac.get("lookback_days", 60)),
+        per_page=int(aac.get("per_page", 300)),
+        max_pages=int(aac.get("max_pages", 10))))
+
     lc = source_cfg(cfg, "lh")
     run("lh", lambda: lh.collect(
         today, upp_types=lc.get("upp_types"),
@@ -222,10 +232,8 @@ def refresh(today: Optional[date] = None, enrich: bool = True,
         today, pages=int(source_cfg(cfg, "youth").get("pages", 2))))
 
     # 아직 수집기를 붙이지 않은 수집원 — 상태만 정직하게 남긴다.
-    #   applyhome_api : 사용자 요청대로 '설정만 준비'. 키를 받으면 수집기를 붙인다
-    #   ish           : robots.txt 가 AI 에이전트를 차단해 구현하지 않았다
+    #   ish : robots.txt 가 AI 에이전트를 차단해 구현하지 않았다
     for sid, reason in (
-        ("applyhome_api", "설정만 준비됨 — 수집기 미구현"),
         ("ish", "robots.txt 가 AI 에이전트를 명시 차단 — 미구현"),
     ):
         if only and sid not in only:
