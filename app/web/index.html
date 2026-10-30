@@ -1,0 +1,453 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HOME RADAR</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --card:#fff; --line:#e3e6ea; --ink:#1b1f24; --dim:#6b7280;
+    --rec:#0f9d58; --chk:#d79000; --exc:#9aa0a6; --accent:#2563eb; --warn:#dc2626;
+    --radius:10px;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font:15px/1.55 -apple-system,"Segoe UI",system-ui,"Malgun Gothic",sans-serif}
+  header{background:var(--card);border-bottom:1px solid var(--line);padding:14px 20px;
+    display:flex;align-items:center;gap:14px;flex-wrap:wrap;position:sticky;top:0;z-index:20}
+  h1{margin:0;font-size:19px;letter-spacing:-.3px}
+  h1 small{font-weight:400;color:var(--dim);font-size:12px;margin-left:6px}
+  .grow{flex:1}
+  button{font:inherit;border:1px solid var(--line);background:var(--card);color:var(--ink);
+    padding:7px 13px;border-radius:8px;cursor:pointer}
+  button:hover{background:#eef1f5}
+  button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+  button.primary:hover{filter:brightness(1.08)}
+  button:disabled{opacity:.5;cursor:not-allowed}
+  main{padding:20px;max-width:1180px;margin:0 auto}
+  .meta{color:var(--dim);font-size:12.5px}
+
+  .alerts{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;
+    margin-bottom:20px}
+  .alert{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
+    padding:13px 15px}
+  .alert.hot{border-color:#f3c0c0;background:#fff7f7}
+  .alert h3{margin:0 0 8px;font-size:13px;color:var(--dim);font-weight:600;
+    display:flex;align-items:center;gap:7px}
+  .alert .n{font-size:21px;font-weight:700;color:var(--ink)}
+  .alert.hot .n{color:var(--warn)}
+  .alert ul{margin:8px 0 0;padding-left:0;list-style:none;font-size:13px}
+  .alert li{padding:3px 0;border-top:1px dashed var(--line)}
+  .alert li:first-child{border-top:0}
+
+  .bar{display:flex;gap:9px;align-items:center;flex-wrap:wrap;margin-bottom:14px}
+  select,input[type=text],input[type=number]{font:inherit;padding:6px 9px;
+    border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--ink)}
+  label.chk{display:inline-flex;align-items:center;gap:6px;font-size:13.5px;color:var(--dim)}
+
+  .bucket{margin-bottom:26px}
+  .bucket>h2{margin:0 0 11px;font-size:16px;display:flex;align-items:center;gap:9px}
+  .pill{font-size:11.5px;font-weight:700;padding:3px 9px;border-radius:999px;color:#fff}
+  .pill.rec{background:var(--rec)} .pill.chk{background:var(--chk)}
+  .pill.exc{background:var(--exc)}
+  .bucket>h2 .meta{font-weight:400}
+
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
+    padding:13px 15px;margin-bottom:9px}
+  .card.urgent{border-left:3px solid var(--warn)}
+  .card .top{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap}
+  .card .title{font-weight:600;font-size:15.5px}
+  .tag{font-size:11.5px;color:var(--dim);border:1px solid var(--line);
+    border-radius:6px;padding:1px 7px;white-space:nowrap}
+  .tag.d{border-color:#f3c0c0;color:var(--warn);font-weight:600}
+  .tag.k{background:#eef2ff;border-color:#dde3ff;color:#3b4fd8}
+  .card .line{margin-top:7px;font-size:13.5px;color:#39404a}
+  .card .line b{font-weight:600;color:var(--ink)}
+  .why{margin-top:8px;font-size:13px;display:flex;flex-direction:column;gap:3px}
+  .why div::before{content:"· ";color:var(--dim)}
+  .why .blk{color:var(--warn)}
+  .why .tip{color:#8a6d00}
+  .card a{color:var(--accent);text-decoration:none;font-size:13px}
+  .card a:hover{text-decoration:underline}
+  .empty{color:var(--dim);font-size:13.5px;padding:10px 2px}
+
+  dialog{border:1px solid var(--line);border-radius:14px;padding:0;max-width:720px;
+    width:calc(100% - 32px);box-shadow:0 18px 50px rgba(0,0,0,.18)}
+  dialog::backdrop{background:rgba(15,20,28,.45)}
+  .dlg-h{padding:16px 20px;border-bottom:1px solid var(--line);display:flex;
+    align-items:center;gap:10px}
+  .dlg-h h2{margin:0;font-size:17px}
+  .dlg-b{padding:18px 20px;max-height:66vh;overflow:auto}
+  .dlg-f{padding:13px 20px;border-top:1px solid var(--line);display:flex;
+    gap:9px;justify-content:flex-end;align-items:center}
+  fieldset{border:1px solid var(--line);border-radius:10px;margin:0 0 15px;padding:13px 15px}
+  legend{font-size:12.5px;color:var(--dim);font-weight:600;padding:0 5px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:11px}
+  .f{display:flex;flex-direction:column;gap:4px}
+  .f span{font-size:12.5px;color:var(--dim)}
+  .hint{font-size:12px;color:var(--dim);margin-top:7px}
+  .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:26px;background:#1b1f24;
+    color:#fff;padding:10px 17px;border-radius:9px;font-size:13.5px;z-index:60;display:none}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>HOME RADAR <small>공식 청약 공고 · 내 조건 필터</small></h1>
+  <div class="grow"></div>
+  <span id="stamp" class="meta"></span>
+  <button id="btn-profile">내 조건</button>
+  <button id="btn-refresh" class="primary">새로고침</button>
+</header>
+
+<main>
+  <section class="alerts" id="alerts"></section>
+
+  <div class="bar">
+    <select id="f-region"><option value="">지역 전체</option></select>
+    <select id="f-kind"><option value="">유형 전체</option></select>
+    <input type="text" id="f-q" placeholder="단지명 검색" style="width:170px">
+    <label class="chk"><input type="checkbox" id="f-closed"> 마감된 공고도 보기</label>
+    <span class="grow"></span>
+    <span id="stats" class="meta"></span>
+  </div>
+
+  <div id="buckets"></div>
+</main>
+
+<dialog id="dlg">
+  <form method="dialog" id="pform">
+    <div class="dlg-h"><h2>내 조건</h2><div class="grow"></div>
+      <span class="meta" id="inc-hint"></span></div>
+    <div class="dlg-b">
+
+      <fieldset><legend>기본</legend>
+        <div class="grid">
+          <label class="f"><span>생년월일 (YYYY-MM-DD 또는 연도)</span>
+            <input type="text" name="birth" placeholder="1995-03-02"></label>
+          <label class="f"><span>혼인 상태</span><select name="marital"></select></label>
+          <label class="f"><span>가구원 수 (소득 기준 계산)</span>
+            <input type="number" name="household_size" min="1" max="10"></label>
+          <label class="f"><span>미성년 자녀 수</span>
+            <input type="number" name="children" min="0" max="10"></label>
+          <label class="f"><span>거주 시도</span><select name="residence"></select></label>
+          <label class="f"><span>세대 구성</span><select name="household"></select></label>
+        </div>
+        <div class="grid" style="margin-top:11px">
+          <label class="chk"><input type="checkbox" name="newborn"> 2세 미만 자녀·임신 중</label>
+          <label class="chk"><input type="checkbox" name="single_parent"> 한부모 가정</label>
+          <label class="chk"><input type="checkbox" name="student"> 대학(원)생</label>
+          <label class="chk"><input type="checkbox" name="disabled"> 장애인 등록</label>
+          <label class="chk"><input type="checkbox" name="low_income"> 수급·차상위</label>
+          <label class="chk"><input type="checkbox" name="artist_or_startup"> 예술인·청년창업</label>
+        </div>
+      </fieldset>
+
+      <fieldset><legend>주택 보유 · 청약통장</legend>
+        <div class="grid">
+          <label class="chk"><input type="checkbox" name="homeless"> 본인 무주택</label>
+          <label class="chk"><input type="checkbox" name="household_homeless"> 세대원 전원 무주택</label>
+          <label class="chk"><input type="checkbox" name="ever_owned"> 과거 주택 보유 이력</label>
+          <label class="chk"><input type="checkbox" name="has_account"> 청약통장 보유</label>
+          <label class="f"><span>통장 가입 기간 (년)</span>
+            <input type="number" name="account_years" min="0" max="40"></label>
+          <label class="f"><span>납입 횟수</span>
+            <input type="number" name="account_payments" min="0" max="600"></label>
+          <label class="f"><span>통장 쓰는 공고 처리</span>
+            <select name="account_mode"></select></label>
+        </div>
+      </fieldset>
+
+      <fieldset><legend>소득 · 자산</legend>
+        <div class="grid">
+          <label class="f"><span>세전 월소득 (만원)</span>
+            <input type="number" name="monthly_income" min="0" placeholder="예: 350"></label>
+          <label class="f"><span>총자산 (만원)</span>
+            <input type="number" name="assets" min="0"></label>
+          <label class="f"><span>자동차가액 (만원)</span>
+            <input type="number" name="car" min="0"></label>
+        </div>
+        <div class="hint">소득·자산은 <b>제외 근거로 쓰지 않는다.</b> 공고별 실제 기준이 항상
+          우선하므로, 상한을 넘으면 추천을 '확인'으로 낮추고 사유만 적는다.</div>
+      </fieldset>
+
+      <fieldset><legend>알림 받을 지역 · 유형</legend>
+        <div id="regions" class="grid"></div>
+        <div id="wants" class="grid" style="margin-top:11px"></div>
+        <div class="grid" style="margin-top:11px">
+          <label class="f"><span>마감 며칠 전부터 알릴까</span>
+            <input type="number" name="remind_days" min="0" max="30"></label>
+        </div>
+      </fieldset>
+
+    </div>
+    <div class="dlg-f">
+      <span class="meta grow" id="pmsg"></span>
+      <button value="cancel">닫기</button>
+      <button id="btn-save" class="primary" value="save">저장</button>
+    </div>
+  </form>
+</dialog>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const $ = s => document.querySelector(s);
+let META = null, VIEW = null, POLL = null;
+
+function toast(msg, ms = 2600) {
+  const t = $('#toast'); t.textContent = msg; t.style.display = 'block';
+  clearTimeout(t._h); t._h = setTimeout(() => t.style.display = 'none', ms);
+}
+
+/* ---------------- 조회 ---------------- */
+async function loadView() {
+  const closed = $('#f-closed').checked;
+  const r = await fetch(`/api/view?include_closed=${closed}`);
+  VIEW = await r.json();
+  render();
+}
+
+function render() {
+  if (!VIEW) return;
+  if (!VIEW.ready) {
+    $('#alerts').innerHTML = '';
+    $('#buckets').innerHTML = `<div class="empty">${VIEW.message}</div>`;
+    $('#stats').textContent = ''; $('#stamp').textContent = '';
+    return;
+  }
+  const s = VIEW.stats;
+  $('#stamp').textContent = VIEW.fetched_at ? `수집 ${VIEW.fetched_at.replace('T', ' ')}` : '';
+  $('#stats').textContent =
+    `수집 ${s.collected}건 · 표시 ${s.shown}건 · 추천 ${s.추천} / 확인 ${s.확인} / 제외 ${s.제외}`
+    + (s.무시 ? ` · 후속안내 ${s.무시}건 숨김` : '');
+
+  renderAlerts();
+  fillFilters();
+  renderBuckets();
+}
+
+function renderAlerts() {
+  const a = VIEW.alerts, d = VIEW.stats.remind_days;
+  const box = (cls, title, items, note) => `
+    <div class="alert ${cls}">
+      <h3>${title}</h3>
+      <div class="n">${items.length}건</div>
+      ${items.length ? `<ul>${items.slice(0, 5).map(r =>
+        `<li>${r.days_left !== null ? `D-${r.days_left} · ` : ''}${esc(r.title)}</li>`).join('')}
+        ${items.length > 5 ? `<li class="meta">그 외 ${items.length - 5}건</li>` : ''}</ul>`
+        : `<div class="meta" style="margin-top:6px">${note}</div>`}
+    </div>`;
+  $('#alerts').innerHTML =
+    box('', '오늘 새로 올라온 공고', a.new, '오늘 처음 관측된 공고가 없습니다')
+    + box(a.closing.length ? 'hot' : '', `접수 마감 ${d}일 이내`, a.closing, '임박한 마감이 없습니다')
+    + box('', '오늘이 접수일', a.today, '오늘 접수하는 공고가 없습니다');
+}
+
+function fillFilters() {
+  const all = [].concat(VIEW.buckets.추천, VIEW.buckets.확인, VIEW.buckets.제외);
+  const fill = (sel, values, label) => {
+    const cur = sel.value;
+    sel.innerHTML = `<option value="">${label}</option>` +
+      [...new Set(values)].filter(Boolean).sort()
+        .map(v => `<option${v === cur ? ' selected' : ''}>${esc(v)}</option>`).join('');
+  };
+  fill($('#f-region'), all.map(r => r.region), '지역 전체');
+  fill($('#f-kind'), all.map(r => r.verdict.kind), '유형 전체');
+}
+
+function passes(r) {
+  const reg = $('#f-region').value, kind = $('#f-kind').value,
+        q = $('#f-q').value.trim().toLowerCase();
+  if (reg && r.region !== reg) return false;
+  if (kind && r.verdict.kind !== kind) return false;
+  if (q && !(r.title || '').toLowerCase().includes(q)) return false;
+  return true;
+}
+
+const PILL = { 추천: 'rec', 확인: 'chk', 제외: 'exc' };
+const DESC = {
+  추천: '내 조건에 구조적으로 맞는 공고',
+  확인: '가능성은 있지만 공고문을 봐야 하는 공고',
+  제외: '구조적으로 지원이 안 되는 공고 — 왜 빠졌는지 확인용',
+};
+
+function renderBuckets() {
+  $('#buckets').innerHTML = ['추천', '확인', '제외'].map(level => {
+    const rows = VIEW.buckets[level].filter(passes);
+    return `<section class="bucket">
+      <h2><span class="pill ${PILL[level]}">${level}</span>
+        <span>${rows.length}건</span>
+        <span class="meta">${DESC[level]}</span></h2>
+      ${rows.length ? rows.map(card).join('')
+        : '<div class="empty">해당하는 공고가 없습니다</div>'}
+    </section>`;
+  }).join('');
+}
+
+function card(r) {
+  const v = r.verdict, dl = r.days_left;
+  const urgent = dl !== null && dl >= 0 && dl <= 3 && !r.closed;
+  const period = r.begin ? `${r.begin}${r.end && r.end !== r.begin ? ` ~ ${r.end}` : ''}` : '미정';
+  const tags = [
+    r.region && `<span class="tag">${esc(r.region)}</span>`,
+    `<span class="tag k">${esc(v.kind)}</span>`,
+    r.category && `<span class="tag">${esc(r.category)}</span>`,
+    r.closed ? '<span class="tag">마감</span>'
+      : (dl !== null ? `<span class="tag d">D-${dl}</span>` : ''),
+  ].filter(Boolean).join(' ');
+
+  const facts = [
+    `<b>접수</b> ${period}`,
+    r.announce && `<b>발표</b> ${r.announce}`,
+    r.households && `<b>규모</b> ${esc(r.households)}`,
+    r.price && `<b>공급금액</b> ${esc(r.price)}`,
+  ].filter(Boolean).join(' &nbsp;·&nbsp; ');
+
+  const why = [
+    ...v.blockers.map(x => `<div class="blk">${esc(x)}</div>`),
+    ...v.reasons.map(x => `<div>${esc(x)}</div>`),
+    ...v.tips.map(x => `<div class="tip">${esc(x)}</div>`),
+    `<div class="meta">청약통장: ${esc(v.account_label)}</div>`,
+  ].join('');
+
+  const links = [
+    r.doc_url && `<a href="${esc(r.doc_url)}" target="_blank" rel="noopener">모집공고문 PDF</a>`,
+    r.url && `<a href="${esc(r.url)}" target="_blank" rel="noopener">청약홈</a>`,
+  ].filter(Boolean).join(' &nbsp; ');
+
+  return `<article class="card${urgent ? ' urgent' : ''}">
+    <div class="top"><span class="title">${esc(r.title)}</span>${tags}</div>
+    <div class="line">${facts}</div>
+    ${r.address ? `<div class="line meta">${esc(r.address)}</div>` : ''}
+    <div class="why">${why}</div>
+    ${links ? `<div class="line">${links}</div>` : ''}
+  </article>`;
+}
+
+function esc(s) {
+  return String(s ?? '').replace(/[&<>"']/g,
+    c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+/* ---------------- 새로고침 ---------------- */
+async function refresh() {
+  const btn = $('#btn-refresh');
+  const r = await fetch('/api/refresh?enrich=true', { method: 'POST' });
+  if (r.status === 409) { toast('이미 수집 중입니다'); return; }
+  btn.disabled = true; btn.textContent = '수집 중…';
+  clearInterval(POLL);
+  POLL = setInterval(async () => {
+    const st = await (await fetch('/api/refresh/status')).json();
+    if (st.running) return;
+    clearInterval(POLL);
+    btn.disabled = false; btn.textContent = '새로고침';
+    if (st.error) toast('수집 실패: ' + st.error, 6000);
+    else {
+      const w = (st.result?.warnings || []).length;
+      toast(`수집 완료 — ${st.result?.count ?? 0}건` + (w ? ` (경고 ${w}건)` : ''));
+    }
+    loadView();
+  }, 1500);
+}
+
+/* ---------------- 내 조건 ---------------- */
+async function openProfile() {
+  const data = await (await fetch('/api/profile')).json();
+  META = data.meta;
+  const f = $('#pform'), p = data.profile;
+
+  const opts = (name, list) => {
+    const sel = f.elements[name];
+    sel.innerHTML = list.map(v => `<option>${esc(v)}</option>`).join('');
+  };
+  opts('marital', META.marital);
+  opts('household', META.household);
+  opts('account_mode', META.account_mode);
+  opts('residence', META.sido);
+
+  $('#regions').innerHTML = META.sido.map(s =>
+    `<label class="chk"><input type="checkbox" class="rg" value="${s}"
+      ${(p.regions || []).includes(s) ? 'checked' : ''}> ${s}</label>`).join('');
+  $('#wants').innerHTML = META.want_kinds.map(k =>
+    `<label class="chk"><input type="checkbox" class="wt" value="${k}"
+      ${p.want?.[k] ? 'checked' : ''}> ${k}</label>`).join('');
+
+  for (const [k, val] of Object.entries(p)) {
+    const el = f.elements[k];
+    if (!el || el.length > 1 && !el.tagName) continue;
+    if (el.type === 'checkbox') el.checked = !!val;
+    else if (el.tagName) el.value = val ?? '';
+  }
+  showIncomeHint();
+  $('#pmsg').textContent = data.saved ? '' : '아직 저장된 조건이 없습니다 — 기본값이 들어가 있습니다';
+  $('#dlg').showModal();
+}
+
+function showIncomeHint() {
+  const f = $('#pform');
+  // income_base 키는 1~7 (7은 '7인 이상')
+  const n = Math.max(1, Math.min(7, Number(f.elements.household_size.value) || 1));
+  const base = META?.income_base?.[String(n)];
+  const inc = Number(f.elements.monthly_income.value) || 0;
+  if (!base) { $('#inc-hint').textContent = ''; return; }
+  const pct = inc ? ` · 내 소득 ${(inc * 10000 / base * 100).toFixed(1)}%` : '';
+  $('#inc-hint').textContent =
+    `${n}인 도시근로자 월평균소득 ${(base / 10000).toLocaleString()}만원${pct}`;
+}
+
+async function saveProfile(e) {
+  const f = $('#pform');
+  const num = n => { const v = f.elements[n].value; return v === '' ? null : Number(v); };
+  const body = {
+    birth: f.elements.birth.value.trim(),
+    marital: f.elements.marital.value,
+    household_size: num('household_size') ?? 1,
+    children: num('children') ?? 0,
+    newborn: f.elements.newborn.checked,
+    single_parent: f.elements.single_parent.checked,
+    homeless: f.elements.homeless.checked,
+    ever_owned: f.elements.ever_owned.checked,
+    household: f.elements.household.value,
+    household_homeless: f.elements.household_homeless.checked,
+    student: f.elements.student.checked,
+    monthly_income: num('monthly_income'),
+    assets: num('assets') ?? 0,
+    car: num('car') ?? 0,
+    low_income: f.elements.low_income.checked,
+    disabled: f.elements.disabled.checked,
+    artist_or_startup: f.elements.artist_or_startup.checked,
+    account_years: num('account_years') ?? 0,
+    account_payments: num('account_payments') ?? 0,
+    has_account: f.elements.has_account.checked,
+    residence: f.elements.residence.value,
+    regions: [...document.querySelectorAll('.rg:checked')].map(x => x.value),
+    want: Object.fromEntries(
+      [...document.querySelectorAll('.wt')].map(x => [x.value, x.checked])),
+    account_mode: f.elements.account_mode.value,
+    remind_days: num('remind_days') ?? 3,
+  };
+  const r = await fetch('/api/profile', {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!r.ok) { e.preventDefault(); $('#pmsg').textContent = '저장 실패'; return; }
+  toast('조건을 저장했습니다 — 판정을 다시 계산합니다');
+  loadView();
+}
+
+/* ---------------- 바인딩 ---------------- */
+$('#btn-refresh').onclick = refresh;
+$('#btn-profile').onclick = openProfile;
+$('#btn-save').onclick = saveProfile;
+$('#f-closed').onchange = loadView;
+for (const id of ['#f-region', '#f-kind']) $(id).onchange = renderBuckets;
+$('#f-q').oninput = renderBuckets;
+$('#pform').addEventListener('input', e => {
+  if (['household_size', 'monthly_income'].includes(e.target.name)) showIncomeHint();
+});
+
+loadView();
+</script>
+</body>
+</html>

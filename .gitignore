@@ -1,0 +1,16 @@
+# 개인정보 — 절대 커밋하지 않는다
+profile.json
+.env
+
+# 런타임 데이터 / 캐시
+data/
+.cache/
+
+# 참고용으로 클론한 외부 저장소 (우리 코드가 아님)
+_reference/
+
+# python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
