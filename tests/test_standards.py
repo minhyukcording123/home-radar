@@ -437,5 +437,250 @@ class TestOfficialGuards(unittest.TestCase):
         self.assertIn("myhome.go.kr", d["source"]["url"])
 
 
+# ============================================================ 2026-10 추가 기준
+# 장기전세·영구임대·전세임대·청년안심주택·뉴:홈 유형별 기준의 회귀 테스트.
+# 전부 공식 페이지에서 확인한 값이다 (마이홈 장기전세 2026년도 적용기준,
+# 마이홈 영구임대·뉴홈 유형별 페이지, LH 전세임대포털, 서울시 청년안심주택).
+class TestLongTermLeaseBoundaries(unittest.TestCase):
+    """장기전세 — 마이홈 2026년도 적용기준 표와 ±1원 검산."""
+
+    def test_1p_relaxed_boundary(self):
+        """1인 100%+20%p 완화 = 4,576,036원 — 마이홈 표의 완성값."""
+        self.assertEqual(compare_income("장기전세", 1, 4_576_036)[0], "충족")
+        # 초과해도 85㎡ 초과분(기준 미확정)이 있을 수 있어 불충족을 안 만든다
+        self.assertEqual(compare_income("장기전세", 1, 4_576_037)[0], "미확인")
+        self.assertEqual(compare_income("장기전세", 1, 99_999_999)[0], "미확인")
+
+    def test_3p_base_and_over60_tier(self):
+        self.assertEqual(income_limit("장기전세", 3)[0], 8_168_429)   # 100%
+        self.assertEqual(compare_income("장기전세", 3, 8_168_429)[0], "충족")
+        # 전용 60㎡ 초과가 확정되면 120% (마이홈 표 3인 9,802,115)
+        self.assertEqual(
+            compare_income("장기전세", 3, 9_802_115, tier="전용60초과")[0],
+            "충족")
+
+    def test_asset_uses_lower_region_cap(self):
+        """총자산이 지역별(서울 66,200/경기 41,700)이라 낮은 쪽이 하한이다."""
+        lims = asset_limits("장기전세")
+        self.assertEqual(lims["total"], 41_700)
+        self.assertEqual(lims["car"], 4_542)
+        self.assertTrue(lims["met_only"])     # 초과 = 서울 한도 가능성 → 미확인
+        self.assertTrue(lims["source"]["official"])
+
+    def test_judge_long_term_lease(self):
+        """공고 제목 '장기전세' → 기준 매칭, met_only 라 제외는 안 만든다."""
+        n = mk("제34차 장기전세주택 입주자 모집")
+        v = judge(n, base_profile(income_work=457, assets=41_700), TODAY)
+        self.assertEqual(check_of(v, "소득").status, MET)
+        self.assertTrue(check_of(v, "소득").official)
+        self.assertEqual(check_of(v, "총자산").status, MET)
+        # 자산 초과 — 서울 한도(66,200) 가능성이 있어 미확인에 머문다
+        v = judge(n, base_profile(income_work=457, assets=41_701), TODAY)
+        self.assertEqual(check_of(v, "총자산").status, UNKNOWN)
+        self.assertNotEqual(v.level, "제외")
+        # 소득 초과 — 85㎡ 초과분 기준 미확정이라 역시 미확인
+        v = judge(n, base_profile(income_work=600), TODAY)
+        self.assertEqual(check_of(v, "소득").status, UNKNOWN)
+        self.assertNotEqual(v.level, "제외")
+
+
+class TestPermanentRentalBoundaries(unittest.TestCase):
+    """영구임대 — 2순위 50%(1인 70%·2인 60%)가 보장 하한. 완화는 페이지 명시."""
+
+    def test_relaxed_boundaries(self):
+        # 1인 70% = 2,669,354 (마이홈 장기전세 페이지 50% 열과도 일치)
+        self.assertEqual(compare_income("영구임대", 1, 2_669_354)[0], "충족")
+        self.assertEqual(compare_income("영구임대", 1, 2_669_355)[0], "미확인")
+        # 2인 60% / 3인 50%
+        self.assertEqual(income_limit("영구임대", 2)[0], 3_519_762)
+        self.assertEqual(compare_income("영구임대", 3, 4_084_215)[0], "충족")
+
+    def test_over_income_never_rejects(self):
+        """수급자 1순위·장애인 100% 가 공존 — 초과로 탈락을 확정하지 않는다."""
+        self.assertEqual(compare_income("영구임대", 1, 99_999_999)[0], "미확인")
+
+    def test_asset_amounts_not_confirmed(self):
+        """자산 금액이 공식 페이지에 없다 — 금액 비교를 만들면 안 된다."""
+        lims = asset_limits("영구임대")
+        self.assertTrue(lims["applies"])
+        self.assertIsNone(lims["total"])
+        self.assertIsNone(lims["estate"])
+        self.assertIsNone(lims["car"])
+        self.assertTrue(lims["met_only"])
+
+
+class TestJeonseRentalBoundaries(unittest.TestCase):
+    """전세임대 — LH 전세임대포털의 순위 구조. 전부 met_only(수급자 특례 공존)."""
+
+    def test_youth_mirrors_single_table(self):
+        """청년 3순위 — 본인 소득, 1인 가구 100% = 3,813,363원."""
+        self.assertEqual(compare_income("청년전세임대", 1, 3_813_363)[0], "충족")
+        self.assertEqual(compare_income("청년전세임대", 1, 99_999_999)[0],
+                         "미확인")
+        lims = asset_limits("청년전세임대")
+        self.assertEqual(lims["total"], 25_100)   # 행복주택 청년 준용(2026)
+        self.assertEqual(lims["car"], 4_542)
+        self.assertTrue(lims["met_only"])
+
+    def test_newlywed_type1_boundary(self):
+        """신혼 Ⅰ형 70%(배우자 소득 시 90%) — 2인 가구 ±1원."""
+        self.assertEqual(
+            compare_income("신혼부부전세임대", 2, 4_106_389, dual=False)[0],
+            "충족")
+        self.assertEqual(
+            compare_income("신혼부부전세임대", 2, 5_279_643, dual=True)[0],
+            "충족")
+        # Ⅱ형(100~120%) 가능성 — 초과는 미확인까지만
+        self.assertEqual(
+            compare_income("신혼부부전세임대", 2, 5_279_644, dual=True)[0],
+            "미확인")
+        self.assertEqual(asset_limits("신혼부부전세임대")["total"], 34_500)
+
+    def test_existing_house_floor_is_rank2(self):
+        """기존주택 — 2순위 소득 50%가 비수급자도 보장되는 하한."""
+        # 1인 50% = 1,906,682. 완화 적용 여부 미확정 → 70% 까지는 밴드
+        self.assertEqual(compare_income("기존주택전세임대", 1, 1_906_682)[0],
+                         "충족")
+        self.assertEqual(compare_income("기존주택전세임대", 1, 1_906_683)[0],
+                         "미확인")
+        # 자산은 영구임대 준용인데 금액 미확정 — 비교를 만들지 않는다
+        self.assertIsNone(asset_limits("기존주택전세임대")["total"])
+
+    def test_judge_jeonse_rental(self):
+        """공고 제목 '전세임대' → 기준 매칭과 공식 판정."""
+        n = mk("2026년 기존주택 전세임대 입주자 모집")
+        v = judge(n, base_profile(income_work=190), TODAY)   # 1,900,000
+        self.assertEqual(check_of(v, "소득").status, MET)
+        self.assertTrue(check_of(v, "소득").official)
+        # 청년 전세임대는 본인 소득(1인 가구 기준)으로 판정한다
+        n = mk("2026년 청년 전세임대 1순위 입주자 수시모집")
+        v = judge(n, base_profile(income_work=381), TODAY)   # 3,810,000
+        self.assertEqual(check_of(v, "소득").status, MET)
+
+
+class TestYouthSafeHousing(unittest.TestCase):
+    """청년안심주택 — 본인 100%(1인 가구 기준)가 전 트랙 보장 하한."""
+
+    def test_income_floor_and_band(self):
+        self.assertEqual(compare_income("청년안심주택", 1, 3_813_363)[0], "충족")
+        # 민간 특공 120%·민간 일반공급(소득 무관)이 남아 있어 불충족은 없다
+        self.assertEqual(compare_income("청년안심주택", 1, 4_576_037)[0],
+                         "미확인")
+        self.assertEqual(compare_income("청년안심주택", 1, 99_999_999)[0],
+                         "미확인")
+
+    def test_asset_floor_is_youth_cap(self):
+        """청년 본인 2억 5,100만원이 가장 낮은 한도 (신혼은 3억 4,500만원)."""
+        lims = asset_limits("청년안심주택")
+        self.assertEqual(lims["total"], 25_100)
+        self.assertIsNone(lims["car"])            # 자동차 기준 페이지 미기재
+        self.assertTrue(lims["met_only"])
+        self.assertTrue(lims["source"]["official"])
+        self.assertIn("2026", lims["source"]["asof"])
+
+
+class TestNewHomeByType(unittest.TestCase):
+    """뉴:홈 유형별 — 일반공급 100% 하한 + met_only (특공 130~140% 공존)."""
+
+    def test_income_floor_met_only(self):
+        for key in standards.NEWHOME_SALE_KEYS:
+            # 3인 100% = 8,168,429 — 이하면 어느 공급으로든 지원 가능
+            self.assertEqual(compare_income(key, 3, 8_168_429)[0], "충족", key)
+            # 초과는 특공(최대 140%) 가능성 — 불충족을 만들지 않는다
+            self.assertEqual(compare_income(key, 3, 8_168_430)[0], "미확인", key)
+            self.assertEqual(compare_income(key, 3, 99_999_999)[0], "미확인",
+                             key)
+
+    def test_share_and_choice_use_net_asset(self):
+        """나눔형·선택형은 부동산가액이 아니라 순자산 3억 6,200만원을 본다."""
+        for key in ("공공분양나눔형", "공공분양선택형"):
+            lims = asset_limits(key)
+            self.assertEqual(lims["total"], 36_200, key)
+            self.assertIsNone(lims["estate"], key)
+            self.assertTrue(lims["met_only"], key)
+            self.assertTrue(lims["source"]["official"], key)
+
+    def test_general_type_uses_estate(self):
+        """일반형은 부동산 2억 1,550만원 — estate 로 담겨야 eligibility 가
+        프로필의 real_estate(부동산가액)와 직접 비교할 수 있다."""
+        lims = asset_limits("공공분양일반형")
+        self.assertIsNone(lims["total"])
+        self.assertEqual(lims["estate"], 21_550)
+        self.assertEqual(lims["car"], 4_542)
+        self.assertTrue(lims["source"]["official"])
+
+    def test_untyped_public_sale_stays_unofficial(self):
+        """유형 미상 공공분양은 official=False 유지 — 충족·불충족 불가."""
+        self.assertEqual(STANDARDS_PUBLIC_SALE_SOURCE, "newhome-public-sale")
+        self.assertFalse(is_official("newhome-public-sale"))
+        for status in (MET, UNMET):
+            c = Check("소득", status, "x", source_key="newhome-public-sale")
+            self.assertEqual(c.status, UNKNOWN)
+
+
+class TestNewSourcesRegistered(unittest.TestCase):
+    NEW_KEYS = ("myhome-newhome-share", "myhome-newhome-choice",
+                "myhome-newhome-general", "myhome-longterm-lease",
+                "myhome-permanent-rental", "lh-jeonse-rental",
+                "seoul-youth-safe-housing")
+
+    def test_registered_official_with_url(self):
+        """새 출처 전부 — rules 레지스트리 병합 + official + URL 보유."""
+        for key in self.NEW_KEYS:
+            self.assertIn(key, RULE_SOURCES, key)
+            self.assertTrue(is_official(key), key)
+            self.assertTrue(RULE_SOURCES[key]["url"].startswith("https://"),
+                            key)
+
+    def test_asof_or_notice_priority_documented(self):
+        """기준연도가 페이지에 있으면 asof 에, 없으면 note 에 공고문 우선을
+        남긴다 — 연도 불명인 값을 연도 확정처럼 보이게 하지 않는다."""
+        self.assertIn("2026", RULE_SOURCES["myhome-longterm-lease"]["asof"])
+        self.assertIn("2026", RULE_SOURCES["seoul-youth-safe-housing"]["asof"])
+        for key in ("myhome-newhome-share", "myhome-newhome-choice",
+                    "myhome-newhome-general", "lh-jeonse-rental",
+                    "myhome-permanent-rental"):
+            self.assertIsNone(RULE_SOURCES[key]["asof"], key)
+            self.assertIn("공고문", RULE_SOURCES[key]["note"], key)
+
+
+class TestNewStandardsFor(unittest.TestCase):
+    def test_rental_type_mapping(self):
+        self.assertEqual(standards_for("공공임대", ["장기전세"]), ["장기전세"])
+        self.assertEqual(standards_for("공공임대", ["영구임대"]), ["영구임대"])
+        self.assertEqual(standards_for("공공임대", ["청년안심", "청년"]),
+                         ["청년안심주택"])
+        self.assertEqual(standards_for("공공임대", ["전세임대"]),
+                         ["기존주택전세임대"])
+        self.assertEqual(standards_for("공공임대", ["전세임대", "청년"]),
+                         ["청년전세임대"])
+        self.assertEqual(standards_for("공공임대", ["전세임대", "신혼부부"]),
+                         ["신혼부부전세임대"])
+
+    def test_newhome_type_mapping(self):
+        self.assertEqual(standards_for("공공분양", ["나눔형"]),
+                         ["공공분양나눔형"])
+        # 유형이 명시되면 특공 태그보다 유형 기준(자산 체계가 다르다)이 먼저다
+        self.assertEqual(
+            standards_for("공공분양", ["나눔형", "신혼부부", "특별공급"]),
+            ["공공분양나눔형"])
+        self.assertEqual(standards_for("공공분양", ["선택형"]),
+                         ["공공분양선택형"])
+        # 선택형은 '6년 분양전환 공공임대' 제목이라 kind 가 공공임대로 잡힌다
+        self.assertEqual(standards_for("공공임대", ["선택형"]),
+                         ["공공분양선택형"])
+        self.assertEqual(standards_for("공공분양", ["일반형"]),
+                         ["공공분양일반형"])
+        # 일반형 + 특공 태그 — 특공 기준이 더 구체적이라 그쪽이 우선
+        self.assertEqual(standards_for("공공분양", ["일반형", "생애최초"]),
+                         ["생애최초특공"])
+        # 유형 미상 공공분양은 기존대로 보수적 기준(official=False) 유지
+        self.assertEqual(standards_for("공공분양", []), ["공공분양"])
+
+
+# 유형 미상 공공분양 키가 가리키는 출처 — 테스트에서 상수로 고정
+STANDARDS_PUBLIC_SALE_SOURCE = standards.STANDARDS["공공분양"]["source"]
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -69,6 +69,13 @@ TAG_WORDS = {
     "전세임대": ("전세임대", "든든전세"),
     "신혼희망타운": ("신혼희망타운", "신혼희망"),
     "사회주택": ("사회주택",),
+    # 아래 태그가 없으면 standards.py 의 해당 공식 기준이 실공고에서 안 걸린다
+    "영구임대": ("영구임대",),
+    "청년안심": ("청년안심", "역세권청년"),
+    # 뉴:홈 유형 — 자산 체계가 서로 달라(순자산 vs 부동산) 구분이 필요하다.
+    # '일반형'은 '일반공급'과 혼동될 위험이 커서 태그로 두지 않는다 (오탐 방지).
+    "나눔형": ("나눔형", "이익공유형"),
+    "선택형": ("선택형", "6년 분양전환"),
     "무순위": UNRANKED_TYPES,
     "노부모": ("노부모",),
     "특별공급": ("특별공급",),
@@ -98,6 +105,10 @@ INCOME_SENSITIVE = ("공공분양", "공공임대")
 RESIDENCE_SAFE_MONTHS = 24     # 해당지역 거주기간 요건은 보통 6~24개월
 ACCOUNT_SAFE_MONTHS = 24       # 수도권 1순위 가입기간
 ACCOUNT_SAFE_PAYMENTS = 24     # 수도권 공공분양 1순위 납입횟수
+# 자동차가액 — 공식 페이지에서 확인한 공공 유형 기준이 전부 4,542만원이다
+# (국민임대·행복주택·통합공공임대·매입임대·특별공급·뉴:홈 일반형).
+# 기준이 적혀 있지 않은 유형은 이 선 아래면 어느 기준이든 통과한다고 본다.
+CAR_SAFE_MANWON = 4_542
 
 
 def _has(text: str, *words: str) -> bool:
@@ -216,7 +227,21 @@ def _check_target_group(n: Notice, prof: dict, v: Verdict, today: date) -> None:
         v.add(Check("대상 계층", MET if prof.get("disabled") else UNMET,
                     "장애인 대상 공고", source_key="notice-title"))
 
-    if _has(t, "영구임대", "수급자", "주거취약", "쪽방"):
+    # 영구임대는 수급자 전용이 아니다. 1순위가 생계·의료급여 수급자·한부모 등이지만
+    # **2순위는 도시근로자 소득 50%(1인 70%·2인 60%)** 로 수급자가 아니어도 된다.
+    # 그래서 수급자가 아니라고 제외하면 과잉 제외가 된다 — 미확인으로 둔다.
+    if "영구임대" in v.tags:
+        if prof.get("low_income"):
+            v.add(Check("대상 계층", MET,
+                        "영구임대 1순위(수급자·차상위) 대상에 해당",
+                        source_key="notice-title"))
+        else:
+            v.add(Check("대상 계층", UNKNOWN,
+                        "영구임대는 1순위가 수급자·한부모지만 2순위는 "
+                        "도시근로자 소득 50% 이하면 지원할 수 있다",
+                        source_key="supply-rule",
+                        todo="공고문에서 순위별 자격과 잔여 물량 확인"))
+    elif _has(t, "수급자", "주거취약", "쪽방"):
         v.add(Check("대상 계층", MET if prof.get("low_income") else UNMET,
                     "수급자·저소득 취약계층 대상 공고", source_key="notice-title"))
 
@@ -384,6 +409,19 @@ def _applicable_standard(v: Verdict, prof: dict,
         if a is not None and 19 <= a <= 39 and "청년매입임대" in cs:
             return "청년매입임대", ""
         return None, "매입임대 대상 계층을 특정하지 못했다"
+
+    # 전세임대도 매입임대와 같은 구조다 — 계층을 못 좁히면 미확인으로 둔다.
+    # (좁히지 않고 cands[0] 를 쓰면 청년·신혼 태그가 둘 다 있을 때
+    #  엉뚱한 계층의 한도로 판정한다. met_only 라 오제외는 없지만
+    #  화면에 틀린 기준 금액을 보여 주게 된다)
+    if cs <= set(getattr(standards, "JEONSE_RENTAL_KEYS", ())):
+        if newlywed and "신혼부부전세임대" in cs:
+            return "신혼부부전세임대", ""
+        if a is not None and 19 <= a <= 39 and "청년전세임대" in cs:
+            return "청년전세임대", ""
+        if "기존주택전세임대" in cs:
+            return "기존주택전세임대", ""
+        return None, "전세임대 대상 계층을 특정하지 못했다"
 
     # 특별공급이 여러 개 걸린 공고 — 내가 해당하는 특공 기준을 고른다
     if int(prof.get("children") or 0) >= 2 and "다자녀특공" in cs:
@@ -697,12 +735,26 @@ def _check_assets(n: Notice, prof: dict, v: Verdict,
                         f"내 차량 {fmt_won(car)} → {ok_word}",
                         source_key=src_key))
     elif car:
-        # 기준 미기재(고령자 행복주택 등) — 보유 시에만 확인을 요구한다
-        v.add(Check("자동차가액", UNKNOWN,
-                    f"{label}의 자동차가액 기준이 공식 페이지에 없다 "
-                    f"(내 차량 {fmt_won(car)})",
-                    source_key=src_key,
-                    todo="공고문의 자동차가액 기준 확인"))
+        # 기준이 공식 페이지에 **적혀 있지 않은** 유형(고령자 행복주택·청년안심주택 등).
+        #
+        # 있는지도 확인되지 않은 요건으로 추천을 막으면 과하다. 거주기간·통장에
+        # 쓰는 것과 같은 방식으로, **우리가 확인한 모든 공공 유형의 자동차 기준이
+        # 4,542만원**이라는 사실을 쓴다 — 그 선 아래면 어느 기준이든 통과한다.
+        # (명시적으로 더 엄격한 '무차량' 요건은 위 car_forbidden 분기가 잡는다.)
+        if car <= CAR_SAFE_MANWON:
+            v.add(Check("자동차가액", MET,
+                        f"내 차량 {fmt_won(car)} — 확인된 모든 공공 유형의 "
+                        f"자동차 기준({fmt_won(CAR_SAFE_MANWON)}) 이하라 "
+                        f"어느 기준이든 통과한다",
+                        source_key="supply-rule",
+                        todo=f"{label}의 자동차 기준은 공고문에서 확인"))
+        else:
+            v.add(Check("자동차가액", UNKNOWN,
+                        f"{label}의 자동차가액 기준이 공식 페이지에 없고 "
+                        f"내 차량 {fmt_won(car)}이 통상 기준"
+                        f"({fmt_won(CAR_SAFE_MANWON)})을 넘는다",
+                        source_key=src_key,
+                        todo="공고문의 자동차가액 기준 확인"))
 
 
 def _assets_without_standard(prof: dict, v: Verdict, na, car: int) -> None:

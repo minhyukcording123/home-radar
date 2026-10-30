@@ -719,6 +719,82 @@ class TestJudge(unittest.TestCase):
         self.assertEqual(
             next(c for c in v.checks if c.name == "부동산").status, MET)
 
+    def test_permanent_rental_does_not_over_exclude(self):
+        """회귀: 영구임대는 수급자 전용이 아니다.
+
+        1순위가 생계·의료급여 수급자·한부모지만 **2순위는 도시근로자 소득
+        50%(1인 70%·2인 60%)** 로 수급자가 아니어도 지원할 수 있다.
+        수급자가 아니라고 제외하면 과잉 제외다.
+        """
+        n = mk("광주우산3 영구임대주택 예비입주자 모집", region="서울")
+        v = judge(n, base_profile(low_income=False, household_size=1,
+                                  income_work=150), TODAY)
+        self.assertNotEqual(v.level, "제외")
+        tier = next(c for c in v.checks if c.name == "대상 계층")
+        self.assertEqual(tier.status, UNKNOWN)
+        self.assertIn("2순위", tier.detail)
+
+        # 수급자면 1순위로 충족
+        v = judge(n, base_profile(low_income=True, household_size=1,
+                                  income_work=150), TODAY)
+        tier = next(c for c in v.checks if c.name == "대상 계층")
+        self.assertEqual(tier.status, MET)
+
+    def test_other_low_income_notices_still_exclude(self):
+        """수급자 전용이 명시된 공고(쪽방·주거취약)는 그대로 제외한다."""
+        v = judge(mk("쪽방 주거취약계층 주거상향 지원", region="서울"),
+                  base_profile(low_income=False), TODAY)
+        self.assertEqual(v.level, "제외")
+
+    def test_new_tags_fire(self):
+        """standards 의 새 공식 기준이 실공고에서 걸리도록 태그가 붙는가."""
+        cases = {
+            "영구임대주택 예비입주자 모집": "영구임대",
+            "청년안심주택 입주자 모집": "청년안심",
+            "뉴:홈 나눔형 공공분양주택": "나눔형",
+            "뉴:홈 선택형 공공분양주택": "선택형",
+        }
+        for title, tag in cases.items():
+            self.assertIn(tag, tags_of(mk(title)), title)
+
+    def test_general_type_is_not_tagged(self):
+        """'일반형'은 '일반공급'과 혼동되기 쉬워 태그로 두지 않았다."""
+        self.assertNotIn("일반형", tags_of(mk("민영 APT 일반공급 1순위")))
+
+    def test_unstated_car_limit_does_not_block_recommendation(self):
+        """자동차 기준이 공식 페이지에 없는 유형에서, 통상 기준 이하면 충족.
+
+        있는지도 확인되지 않은 요건으로 추천을 막으면 과하다. 확인된 공공 유형의
+        자동차 기준이 전부 4,542만원이므로 그 선 아래면 어느 기준이든 통과한다.
+        (거주기간·통장에 쓰는 '확실히 통과하는 임계값'과 같은 방식)
+        """
+        n = mk("청년안심주택 입주자 모집", region="서울")
+        p = dict(household_size=1, income_work=200, assets=5_000, debts=0,
+                 residence="서울", residence_since="2015-01")
+
+        v = judge(n, base_profile(car=1_200, **p), TODAY)
+        c = next(c for c in v.checks if c.name == "자동차가액")
+        self.assertEqual(c.status, MET)
+        self.assertIn("4,542만원", c.detail)
+
+        # 통상 기준을 넘으면 확정하지 않는다
+        v = judge(n, base_profile(car=6_000, **p), TODAY)
+        c = next(c for c in v.checks if c.name == "자동차가액")
+        self.assertEqual(c.status, UNKNOWN)
+
+        # 차량이 없으면 검사 자체를 만들지 않는다
+        v = judge(n, base_profile(car=0, **p), TODAY)
+        self.assertFalse([c for c in v.checks if c.name == "자동차가액"])
+
+    def test_explicit_no_car_requirement_still_excludes(self):
+        """'자동차 미보유'가 명시된 유형(대학생 행복주택)은 그대로 불충족."""
+        n = mk("대학생 행복주택 입주자 모집", region="서울")
+        v = judge(n, base_profile(student=True, household_size=1,
+                                  income_work=100, assets=3_000, car=1_200),
+                  TODAY)
+        c = next(c for c in v.checks if c.name == "자동차")
+        self.assertEqual(c.status, UNMET)
+
     def test_every_check_has_a_source(self):
         v = judge(mk("서울 공공분양주택", region="서울"), base_profile(), TODAY)
         for c in v.checks:

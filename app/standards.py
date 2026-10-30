@@ -2,7 +2,7 @@
 
 rules.py 의 샘플 기준을 대체하는 **공식 기준표**다. 원칙:
 
-  * 수치는 전부 공식 포털(마이홈·보건복지부·LH)에서 확인한 것만 적는다.
+  * 수치는 전부 공식 포털(마이홈·보건복지부·LH·서울시)에서 확인한 것만 적는다.
     확인하지 못한 것은 official=False 로 남겨 checks.py 의 안전장치가
     자동으로 '미확인'을 만들게 한다. 수치를 창작하지 않는다.
 
@@ -159,6 +159,84 @@ STANDARD_SOURCES: dict[str, dict] = {
                 "나눔형·선택형·일반형별 기준과 적용연도를 확정하지 못했다. "
                 "유형별 기준이 달라(나눔형 청년특공 등) 공고문 확인 필요",
     },
+    # ---- 뉴:홈 유형별 — 마이홈 유형별 페이지에서 직접 확인 ----
+    # 공고가 유형(나눔형·선택형·일반형)을 밝힌 경우에만 쓴다. 유형 미상이면
+    # 위의 newhome-public-sale(official=False)이 그대로 남아 '미확인'을 만든다.
+    "myhome-newhome-share": {
+        "label": "뉴:홈 나눔형(이익공유형 분양주택) 입주자격 (마이홈)",
+        "url": f"{_MYHOME}/selectNewHomeShareTypeView.do",
+        "asof": None,
+        "official": True,
+        "note": "일반공급 100% / 신혼 130(맞벌이 140) / 생애최초 130(우선 100) / "
+                "신생아 140(우선 100) / 청년 140(본인·1인 가구 기준) · "
+                "순자산 3억 6,200만원, 청년특공은 본인 2억 7,600만원+부모 "
+                "10억 3,500만원. 적용연도 미표기 — 청년 한도 예시값이 2026년 "
+                "소득표와 일치함을 확인했다. 공고문이 우선한다",
+    },
+    "myhome-newhome-choice": {
+        "label": "뉴:홈 선택형(6년 분양전환 공공임대) 입주자격 (마이홈)",
+        "url": f"{_MYHOME}/selectNewHomeChoiceTypeView.do",
+        "asof": None,
+        "official": True,
+        "note": "일반공급 100% / 신혼 130(맞벌이 140, 우선 100) / "
+                "생애최초 130(우선 100) / 다자녀·노부모 120 / 청년 140(본인) · "
+                "순자산 3억 6,200만원, 청년특공 본인 2억 7,600만원+부모 "
+                "10억 3,500만원. 적용연도 미표기 — 공고문이 우선한다",
+    },
+    "myhome-newhome-general": {
+        "label": "뉴:홈 일반형(공공분양주택) 입주자격 (마이홈)",
+        "url": f"{_MYHOME}/selectNHTQualificationView.do",
+        "asof": None,
+        "official": True,
+        "note": "일반공급 100%(전용 60㎡ 이하만 소득·자산 검사) / 신혼 130 / "
+                "생애최초 130 / 다자녀·노부모 120 / 신생아 140 · "
+                "부동산 2억 1,550만원·자동차 4,542만원. 맞벌이 완화(최대 "
+                "200%)의 적용 범위와 적용연도는 페이지에서 확정하지 못했다 "
+                "— 자동차 한도가 2026년 값(4,542만원)과 일치. 공고문이 우선",
+    },
+    "myhome-longterm-lease": {
+        "label": "장기전세주택 입주자격 (마이홈)",
+        "url": f"{_MYHOME}/selectlongTermLeaseHouseView.do",
+        "asof": "2026년도 적용기준",
+        "official": True,
+        "note": "전용 60㎡ 이하 100%(1인 120%·2인 110%), 60~85㎡ 120%, "
+                "우선공급 50㎡ 미만 50%·50~60㎡ 70% · 총자산 서울 6억 "
+                "6,200만원·경기 4억 1,700만원 · 자동차 4,542만원. "
+                "85㎡ 초과분의 소득 기준은 페이지에 없어 미확정",
+    },
+    "myhome-permanent-rental": {
+        "label": "영구임대주택 입주자격 (마이홈)",
+        "url": f"{_MYHOME}/selectPermanentRHView.do",
+        "asof": None,
+        "official": True,
+        "note": "1순위 생계·의료급여 수급자·한부모 등 / 국가유공자 등 70% "
+                "(1인 90%·2인 80%) / 2순위 50%(1인 70%·2인 60%) / 일부 "
+                "장애인 100%. 자산 요건의 존재는 명시돼 있으나 금액이 "
+                "페이지에 없어 자산은 미확정 — 공고문 확인",
+    },
+    "lh-jeonse-rental": {
+        "label": "전세임대 입주자격 (LH 전세임대포털)",
+        "url": "https://jeonse.lh.or.kr/jw/li/lfstsRentBsnsGuidance.do",
+        "asof": None,
+        "official": True,
+        "note": "기존주택 1순위 수급자·한부모 등, 2순위 소득 50% / 청년 "
+                "2순위 본인+부모 100%·3순위 본인 100%(1인 가구 기준) / "
+                "신혼·신생아 Ⅰ형 70%(배우자 소득 시 90%)·Ⅱ형 100%(120%). "
+                "자산은 영구·국민임대·행복주택 기준 준용 — 페이지의 금액은 "
+                "과년도 값이라 참조 기준의 2026년 값을 쓴다. 공고문이 우선",
+    },
+    "seoul-youth-safe-housing": {
+        "label": "청년안심주택 입주자격 (서울시)",
+        "url": "https://soco.seoul.go.kr/youth/pgm/home/yohome/"
+               "supportYouth1.do?menuNo=400039",
+        "asof": "2026년 기준",
+        "official": True,
+        "note": "민간임대 특별공급은 세대 소득 120%(완화 없음 — 2026년 표가 "
+                "전 가구원수 ×1.2로 확인됨), 자산 청년 본인 2억 5,100만원· "
+                "신혼 3억 4,500만원. 공공임대분(SH)은 청년 3순위 본인 100% "
+                "(1인 가구 기준) 등 더 낮은 기준 — 본인 100% 이하만 충족으로 "
+                "확정한다. 소득 초과 시 민간 일반공급으로는 신청 가능",
+    },
 }
 
 
@@ -263,6 +341,57 @@ STANDARDS: dict[str, dict] = {
                   "car_forbidden": False, "met_only": False},
         "household": "무주택세대구성원",
     },
+    "장기전세": {
+        "label": "장기전세주택",
+        "source": "myhome-longterm-lease",
+        # 85㎡ 초과분의 소득 기준이 페이지에 없어(물량이 실제로 존재한다)
+        # 초과로 탈락을 확정할 수 없다 → met_only. 60㎡ 이하 100%가 확실한
+        # 하한이고, 전용면적이 60㎡ 초과로 확인되면 120% tier 로 올라간다.
+        "income": {"base": "urban", "pct": 100, "tiers": {"전용60초과": 120},
+                   "dual_pct": None, "relax": True, "dual_relax": None,
+                   "scope": "무주택세대구성원 전원", "scope_mode": "household",
+                   "met_only": True},
+        # 총자산이 지역별로 다르다(서울 66,200 / 경기 41,700) — 기준 키에는
+        # 지역 축이 없어 낮은 쪽(경기)을 하한으로 쓴다: 이하면 어느 지역이든
+        # 충족, 초과는 서울 한도 가능성이 있어 met_only 로 미확인에 머문다.
+        "asset": {"total": 41_700, "estate": None, "car": 4_542,
+                  "car_forbidden": False, "met_only": True},
+        "household": "무주택세대구성원",
+    },
+    "영구임대": {
+        "label": "영구임대주택",
+        "source": "myhome-permanent-rental",
+        # 2순위(일반) 소득 50%가 비수급자도 보장되는 하한이다. 초과해도
+        # 수급자 1순위·장애인 100% 등이 공존해 불충족을 확정하지 않는다.
+        # 1·2인 완화는 페이지가 명시(1인 70%·2인 60%)해 확정.
+        "income": {"base": "urban", "pct": 50, "tiers": {}, "dual_pct": None,
+                   "relax": True, "dual_relax": None,
+                   "scope": "세대", "scope_mode": "household",
+                   "met_only": True},
+        # 자산 요건의 존재만 명시되고 금액이 페이지에 없다 — 전부 None 으로
+        # 두면 금액 비교를 만들지 않아 자동으로 '미확인'에 머문다
+        "asset": {"total": None, "estate": None, "car": None,
+                  "car_forbidden": False, "met_only": True},
+        "household": "수급자·국가유공자·한부모 등 취약계층 "
+                     "(2순위는 소득 50% 이하 일반가구)",
+    },
+    "청년안심주택": {
+        "label": "청년안심주택(서울)",
+        "source": "seoul-youth-safe-housing",
+        # 공공임대분(본인 100%, 1인 가구 기준)과 민간임대 특공(세대 120%)이
+        # 한 공고에 섞인다. 본인 100% 이하면 어느 트랙이든 소득 충족이
+        # 보장되는 하한. 초과는 민간 일반공급(소득 무관)이 남아 있어
+        # 탈락을 확정하지 않는다 → met_only.
+        "income": {"base": "urban1", "pct": 100, "tiers": {}, "dual_pct": None,
+                   "relax": None, "dual_relax": None,
+                   "scope": "본인(민간 특공은 세대)", "scope_mode": "self",
+                   "met_only": True},
+        # 청년 본인 2억 5,100만원이 가장 낮은 한도(신혼은 3억 4,500만원) —
+        # 이하면 어느 계층이든 충족. 자동차 기준은 페이지 미기재.
+        "asset": {"total": 25_100, "estate": None, "car": None,
+                  "car_forbidden": False, "met_only": True},
+        "household": "만 19~39세 청년·신혼부부 (서울)",
+    },
 
     # ---- 매입임대 (LH 공식 페이지 — 순위 구조만 확인, 적용연도 미표기) ----
     "청년매입임대": {
@@ -297,6 +426,53 @@ STANDARDS: dict[str, dict] = {
         "household": "혼인 7년 이내·예비신혼·한부모·유자녀 혼인가구",
     },
 
+    # ---- 전세임대 (LH 전세임대포털 — 순위 구조 확인, 자산은 준용 기준) ----
+    "기존주택전세임대": {
+        "label": "기존주택 전세임대",
+        "source": "lh-jeonse-rental",
+        # 2순위(소득 50%)가 비수급자도 보장되는 하한. 1·2인 완화 적용 여부는
+        # 페이지에서 확정하지 못해 relax=None 밴드로 둔다.
+        # 1순위(수급자·한부모)가 공존해 초과로 탈락을 확정하지 않는다.
+        "income": {"base": "urban", "pct": 50, "tiers": {}, "dual_pct": None,
+                   "relax": None, "dual_relax": None,
+                   "scope": "세대", "scope_mode": "household",
+                   "met_only": True},
+        # 2순위는 영구임대 자산기준 준용인데 그 금액을 공식 확인하지 못했다
+        # — 전부 None 으로 두어 금액 비교를 만들지 않는다 (미확인 유지)
+        "asset": {"total": None, "estate": None, "car": None,
+                  "car_forbidden": False, "met_only": True},
+        "household": "1순위 수급자·보호대상 한부모 등 / 2순위 소득 50% 이하",
+    },
+    "청년전세임대": {
+        "label": "청년 전세임대",
+        "source": "lh-jeonse-rental",
+        # 청년매입임대와 같은 순위 구조 — 3순위(본인 소득, 1인 가구 100%)가
+        # 소득으로 확정할 수 있는 선이다. 초과는 1순위(수급가구) 가능성.
+        "income": {"base": "urban1", "pct": 100, "tiers": {}, "dual_pct": None,
+                   "relax": None, "dual_relax": None,
+                   "scope": "3순위 본인 / 2순위 본인+부모", "scope_mode": "self",
+                   "met_only": True},
+        # 3순위는 행복주택 청년 자산기준 준용 — 참조 기준의 2026년 값.
+        # 이하면 어느 순위든 충족, 초과는 2순위(국민임대 기준) 가능성.
+        "asset": {"total": 25_100, "estate": None, "car": 4_542,
+                  "car_forbidden": False, "met_only": True},
+        "household": "만 19~39세 청년 (대학생·취업준비생 포함)",
+    },
+    "신혼부부전세임대": {
+        "label": "신혼·신생아 전세임대",
+        "source": "lh-jeonse-rental",
+        # Ⅰ형 70%(배우자 소득 시 90%) 이하면 어느 유형이든 소득 충족 보장.
+        # 초과는 Ⅱ형(100~120%) 가능성이 있어 불충족을 만들지 않는다.
+        "income": {"base": "urban", "pct": 70, "tiers": {}, "dual_pct": 90,
+                   "relax": None, "dual_relax": None,
+                   "scope": "세대(배우자 포함)", "scope_mode": "household",
+                   "met_only": True},
+        # Ⅰ·Ⅱ형 모두 국민임대 수준(3억 4,500만원) 준용 — 참조 기준의 2026년 값
+        "asset": {"total": 34_500, "estate": None, "car": 4_542,
+                  "car_forbidden": False, "met_only": True},
+        "household": "혼인 7년 이내·예비신혼·신생아·한부모 가구",
+    },
+
     # ---- 분양 ----
     "신혼희망타운": {
         "label": "신혼희망타운",
@@ -322,6 +498,53 @@ STANDARDS: dict[str, dict] = {
                    "met_only": False},
         "asset": {"total": None, "estate": 21_550, "car": 4_542,
                   "car_forbidden": False, "met_only": False},
+        "household": "무주택세대구성원",
+    },
+
+    # ---- 뉴:홈 유형별 (공고가 나눔형·선택형·일반형을 밝힌 경우) ----
+    # 한 공고 안에 일반공급(100%)과 특공(최대 140%)이 공존하고, 기준 키에는
+    # 특공 축이 없다. 그래서 일반공급 100% 를 '보장되는 하한'으로 쓰고
+    # met_only 로 둔다: 100% 이하면 어느 공급으로든 지원 가능(충족),
+    # 초과는 특공(130~140%) 가능성이 있어 탈락을 확정하지 않는다.
+    "공공분양나눔형": {
+        "label": "뉴:홈 나눔형(이익공유형)",
+        "source": "myhome-newhome-share",
+        "income": {"base": "urban", "pct": 100, "tiers": {}, "dual_pct": None,
+                   "relax": None, "dual_relax": None,
+                   "scope": "세대", "scope_mode": "household",
+                   "met_only": True},
+        # 나눔형·선택형은 부동산가액이 아니라 **순자산 3억 6,200만원**을 본다.
+        # 청년특공만 본인 2억 7,600만원(+부모 10억 3,500만원)으로 더 낮지만,
+        # 3억 6,200만원 이하면 일반공급으로는 지원 가능하므로 충족이 성립한다.
+        "asset": {"total": 36_200, "estate": None, "car": None,
+                  "car_forbidden": False, "met_only": True},
+        "household": "무주택세대구성원 (청년특공은 19~39세 미혼, "
+                     "부모 자산 기준 별도)",
+    },
+    "공공분양선택형": {
+        "label": "뉴:홈 선택형(6년 분양전환)",
+        "source": "myhome-newhome-choice",
+        "income": {"base": "urban", "pct": 100, "tiers": {}, "dual_pct": None,
+                   "relax": None, "dual_relax": None,
+                   "scope": "세대", "scope_mode": "household",
+                   "met_only": True},
+        "asset": {"total": 36_200, "estate": None, "car": None,
+                  "car_forbidden": False, "met_only": True},
+        "household": "무주택세대구성원 (청년특공은 19~39세 미혼, "
+                     "부모 자산 기준 별도)",
+    },
+    "공공분양일반형": {
+        "label": "뉴:홈 일반형(공공분양)",
+        "source": "myhome-newhome-general",
+        # 일반형 일반공급의 소득·자산 검사는 전용 60㎡ 이하에만 붙는다 —
+        # 60㎡ 초과 일반공급은 소득 무관이라 초과로 탈락을 확정할 수 없다.
+        "income": {"base": "urban", "pct": 100, "tiers": {}, "dual_pct": None,
+                   "relax": None, "dual_relax": None,
+                   "scope": "세대", "scope_mode": "household",
+                   "met_only": True},
+        # 일반형은 순자산이 아니라 부동산 2억 1,550만원 + 자동차를 본다
+        "asset": {"total": None, "estate": 21_550, "car": 4_542,
+                  "car_forbidden": False, "met_only": True},
         "household": "무주택세대구성원",
     },
 
@@ -391,6 +614,10 @@ STANDARDS: dict[str, dict] = {
 HAPPY_HOUSE_KEYS = ("청년행복주택", "신혼행복주택", "대학생행복주택",
                     "고령자행복주택")
 PURCHASE_RENTAL_KEYS = ("청년매입임대", "신혼부부매입임대")
+# 전세임대 계층별 키 — 후보가 여럿 남으면 호출부가 프로필로 좁혀야 한다
+JEONSE_RENTAL_KEYS = ("청년전세임대", "신혼부부전세임대", "기존주택전세임대")
+# 뉴:홈 유형별 키 — 공고가 유형을 밝혔을 때만 선택된다
+NEWHOME_SALE_KEYS = ("공공분양나눔형", "공공분양선택형", "공공분양일반형")
 
 
 # ================================================================ 계산
@@ -565,6 +792,14 @@ def standards_for(kind: str, tags: list[str]) -> list[str]:
         return ["국민임대"]
     if "통합공공임대" in t:
         return ["통합공공임대"]
+    if "장기전세" in t:
+        return ["장기전세"]
+    if "영구임대" in t:
+        return ["영구임대"]
+    if "청년안심" in t:
+        # 서울 청년안심주택 — 공공임대분·민간임대분이 한 공고에 섞여
+        # 하나의 보수적 기준(본인 100% 하한)으로 판정한다
+        return ["청년안심주택"]
 
     if "매입임대" in t:
         picks = []
@@ -574,7 +809,25 @@ def standards_for(kind: str, tags: list[str]) -> list[str]:
             picks.append("신혼부부매입임대")
         return picks or list(PURCHASE_RENTAL_KEYS)
 
+    if "전세임대" in t:
+        picks = []
+        if "청년" in t:
+            picks.append("청년전세임대")
+        if "신혼부부" in t or "신생아" in t:
+            picks.append("신혼부부전세임대")
+        # 계층 태그가 없으면 기존주택 전세임대(일반) 기준으로 본다 —
+        # 든든전세는 소득·자산 기준이 달라(사실상 없음) 공고문 확인이 필요
+        # 하지만, 여기 기준은 met_only 라 잘못 제외하는 일은 없다
+        return picks or ["기존주택전세임대"]
+
     if kind in ("공공분양", "공공임대"):
+        # 뉴:홈 유형이 공고에 명시되면 특공 기준보다 유형 기준이 먼저다 —
+        # 나눔형·선택형은 자산 체계(순자산)가 특공(부동산가액)과 다르다.
+        # 선택형은 '6년 분양전환 공공임대'라 kind 가 공공임대로 잡힐 수 있다.
+        if "나눔형" in t:
+            return ["공공분양나눔형"]
+        if "선택형" in t:
+            return ["공공분양선택형"]
         picks = []
         if "생애최초" in t:
             picks.append("생애최초특공")
@@ -587,8 +840,10 @@ def standards_for(kind: str, tags: list[str]) -> list[str]:
         if picks:
             return picks
         if kind == "공공분양":
-            return ["공공분양"]        # 뉴:홈 — official=False, 항상 미확인
-        return []                       # 장기전세·영구임대 등 — 기준 미보유
+            if "일반형" in t:
+                return ["공공분양일반형"]
+            return ["공공분양"]        # 유형 미상 — official=False, 항상 미확인
+        return []                       # 재개발임대 등 — 기준 미보유
 
     if kind == "무순위":
         return ["무순위"]
