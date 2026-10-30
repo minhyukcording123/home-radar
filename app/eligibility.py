@@ -636,10 +636,33 @@ def _check_assets(n: Notice, prof: dict, v: Verdict,
                         source_key=src_key,
                         todo="공고문에 별도 자산 기준이 있으면 공고문이 우선한다"))
     elif lims["estate"] is not None:
-        # 부동산가액만 보는 유형 — 프로필은 부동산을 분리 입력하지 않으므로
-        # '총자산 전체 ≤ 부동산 한도'일 때만 충족을 확정할 수 있다
-        if gross in (None, ""):
-            v.add(missing("자산", "총자산"))
+        # 부동산가액만 보는 유형 (특별공급·뉴:홈 일반형).
+        # 부동산가액을 분리 입력했으면 그 값으로 바로 판정하고,
+        # 없으면 '총자산 전체 ≤ 부동산 한도' 일 때만 충족을 확정한다.
+        estate = prof.get("real_estate")
+        if estate not in (None, ""):
+            estate = int(estate)
+            if estate <= lims["estate"]:
+                v.add(Check("부동산", MET,
+                            f"{label} 부동산 기준 {fmt_won(lims['estate'])} / "
+                            f"내 부동산가액 {fmt_won(estate)} → {ok_word}",
+                            source_key=src_key,
+                            todo="공고문에 별도 자산 기준이 있으면 공고문이 우선한다"))
+            elif met_only:
+                v.add(Check("부동산", UNKNOWN,
+                            f"{label} 부동산 기준 {fmt_won(lims['estate'])} 초과 "
+                            f"(내 부동산가액 {fmt_won(estate)}) — "
+                            "순위별 기준이 달라 확정 불가",
+                            source_key=src_key,
+                            todo="순위별 자산 기준이 달라 공고문으로 확인"))
+            else:
+                v.add(Check("부동산", UNMET,
+                            f"{label} 부동산 기준 {fmt_won(lims['estate'])} / "
+                            f"내 부동산가액 {fmt_won(estate)} → {over_word}",
+                            source_key=src_key,
+                            todo="공고문에 별도 자산 기준이 있으면 공고문이 우선한다"))
+        elif gross in (None, ""):
+            v.add(missing("자산", "총자산 또는 부동산가액"))
         elif int(gross) <= lims["estate"]:
             v.add(Check("부동산", MET,
                         f"{label} 부동산 기준 {fmt_won(lims['estate'])} / "
@@ -651,7 +674,7 @@ def _check_assets(n: Notice, prof: dict, v: Verdict,
                         f"{label}은 부동산가액({fmt_won(lims['estate'])})만 본다 — "
                         f"총자산 {fmt_won(int(gross))} 중 부동산 비중을 알 수 없다",
                         source_key=src_key,
-                        todo="보유 부동산가액을 공고문 기준으로 따로 확인"))
+                        todo="내 조건에서 '부동산가액'을 입력하면 판정이 확정된다"))
 
     # ---- 자동차 ----
     if lims["car_forbidden"]:

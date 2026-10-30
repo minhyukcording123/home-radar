@@ -659,6 +659,52 @@ class TestJudge(unittest.TestCase):
         v = judge(n, base_profile(max_price=60_000), TODAY)
         self.assertNotEqual(v.level, "추천")
 
+    def test_real_estate_input_settles_estate_check(self):
+        """특별공급은 총자산이 아니라 부동산가액만 본다.
+
+        분리 입력하지 않으면 '총자산 전체 ≤ 한도' 일 때만 충족을 확정할 수
+        있어서, 총자산이 한도를 넘으면 미확인에 머문다. 부동산가액을
+        입력하면 그 값으로 바로 판정한다.
+        """
+        n = mk("생애최초 특별공급 공공분양주택 입주자 모집", region="서울")
+        p = dict(household_size=1, income_work=200, debts=0)
+
+        # 총자산 3억 > 부동산 한도 2억 1,550만 → 비중을 몰라 미확인
+        v = judge(n, base_profile(assets=30_000, **p), TODAY)
+        estate = next(c for c in v.checks if c.name == "부동산")
+        self.assertEqual(estate.status, UNKNOWN)
+        self.assertIn("부동산가액", estate.todo)
+
+        # 총자산 자체가 한도 이하면 부동산도 이하 → 충족
+        v = judge(n, base_profile(assets=20_000, **p), TODAY)
+        self.assertEqual(
+            next(c for c in v.checks if c.name == "부동산").status, MET)
+
+        # 부동산가액을 입력하면 총자산과 무관하게 확정된다
+        v = judge(n, base_profile(assets=30_000, real_estate=10_000, **p), TODAY)
+        self.assertEqual(
+            next(c for c in v.checks if c.name == "부동산").status, MET)
+
+    def test_real_estate_boundary(self):
+        """부동산가액 경계 ±1만원."""
+        n = mk("생애최초 특별공급 공공분양주택 입주자 모집", region="서울")
+        p = dict(household_size=1, income_work=200, assets=30_000, debts=0)
+
+        v = judge(n, base_profile(real_estate=21_550, **p), TODAY)
+        self.assertEqual(
+            next(c for c in v.checks if c.name == "부동산").status, MET)
+        v = judge(n, base_profile(real_estate=21_551, **p), TODAY)
+        self.assertEqual(
+            next(c for c in v.checks if c.name == "부동산").status, UNMET)
+
+    def test_real_estate_zero_is_met_not_missing(self):
+        """부동산 0(무주택)은 '미입력'이 아니라 '충족'이다."""
+        n = mk("생애최초 특별공급 공공분양주택 입주자 모집", region="서울")
+        v = judge(n, base_profile(household_size=1, income_work=200,
+                                  assets=30_000, debts=0, real_estate=0), TODAY)
+        self.assertEqual(
+            next(c for c in v.checks if c.name == "부동산").status, MET)
+
     def test_every_check_has_a_source(self):
         v = judge(mk("서울 공공분양주택", region="서울"), base_profile(), TODAY)
         for c in v.checks:
