@@ -2,20 +2,23 @@
 
 가장 중요한 규칙:
 
-    **official=False(샘플) 기준은 '불충족'(제외)을 만들 수 없다.**
+    **official=False(샘플·미확정) 기준은 '불충족'(제외)을 만들 수 없다.**
 
-HOME RADAR 가 가진 소득·자산 수치는 오픈소스 샘플 룰에서 온 어림값이다.
-공고별 실제 기준이 항상 우선하므로 이 값으로 적격·부적격을 확정하면 안 된다.
-그래서 샘플 기준은 '미확인'까지만 만들고, 참고 신호로만 보여준다.
-구조적으로 확실한 것(나이 범위, 무주택, 통장 보유, 대상 계층)만 '불충족'을 만든다.
+공급 유형별 공식 소득·자산 기준(2026년도 적용)은 standards.py 에 있다 —
+마이홈·보건복지부·LH 공식 페이지에서 확인한 값만 official=True 다.
+공식 확인에 실패한 것(뉴:홈 유형별 기준 등)은 official=False 로 남아
+'미확인'까지만 만들고 참고 신호로만 보인다. 공고별 실제 기준이 항상 우선한다.
 
-규칙을 바꾸면 RULES_VERSION 을 올리고 tests/test_core.py 에 회귀 테스트를 추가한다.
+규칙을 바꾸면 RULES_VERSION 을 올리고 tests 에 회귀 테스트를 추가한다.
+(공식 기준 수치는 tests/test_standards.py, 나머지는 tests/test_core.py)
 """
 from __future__ import annotations
 
 from typing import Optional
 
-RULES_VERSION = "2026.10.30-2"
+from .standards import STANDARD_SOURCES, URBAN_WORKER_INCOME_2026
+
+RULES_VERSION = "2026.10.30-3"
 
 # ---------------------------------------------------------------- 출처 레지스트리
 # label  : 화면에 보여줄 근거 이름
@@ -66,7 +69,19 @@ RULE_SOURCES: dict[str, dict] = {
         "official": False,
         "note": "연도별 고시값으로 교체 필요. 지금은 참고 신호로만 쓴다",
     },
+    "sample-special": {
+        "label": "민영 특별공급 소득 상한 (샘플 기준)",
+        "url": "",
+        "asof": None,
+        "official": False,
+        "note": "민영주택 특별공급 소득 기준은 공고·물량 배정별로 달라 "
+                "공식 확정값이 없다. 참고 신호로만 쓴다",
+    },
 }
+
+# 공식 기준(standards.py)의 출처를 같은 레지스트리에 합친다 —
+# checks.Check 가 source_of() 하나로 공식 여부를 판단할 수 있게.
+RULE_SOURCES.update(STANDARD_SOURCES)
 
 
 def source_of(key: str) -> dict:
@@ -78,21 +93,17 @@ def is_official(key: str) -> bool:
     return bool(source_of(key).get("official"))
 
 
-# ---------------------------------------------------------------- 소득 기준 (샘플)
-# 도시근로자 가구원수별 월평균소득 100% (원)
-# 출처: naejipgak-mcp src/data/rules/income-limits.json  (샘플 기준)
-MONTHLY_INCOME_BASE = {
-    1: 4_180_000,
-    2: 6_840_000,
-    3: 8_980_000,
-    4: 10_600_000,
-    5: 11_200_000,
-    6: 12_000_000,
-    7: 12_800_000,   # 7인 이상
-}
-INCOME_BASE_SOURCE = "sample-income"
+# ---------------------------------------------------------------- 소득 기저표 (공식)
+# 도시근로자 가구원수별 월평균소득 100% — 완화 미반영 기저값 (원/월).
+# standards.URBAN_WORKER_INCOME_2026 (마이홈, 2026년도 적용기준) 을 그대로 쓴다.
+# 샘플값(naejipgak-mcp)을 쓰던 자리를 공식값으로 교체했다 — income_ratio 의
+# 참고 신호도 이제 공식 기저로 계산된다.
+MONTHLY_INCOME_BASE = dict(URBAN_WORKER_INCOME_2026)
+INCOME_BASE_SOURCE = "myhome-urban-income"
 
-# 특별공급 유형별 소득 상한(도시근로자 월평균소득 대비 %)
+# 민영주택 특별공급 소득 상한 참고치 (%) — 공식 확정값이 아니다.
+# 공공 유형의 공식 특공 기준은 standards.py 에 있다. 이 표는 공식 기준이
+# 없는 민영 특공의 '참고 신호'에만 쓴다 (source: sample-special → 항상 미확인).
 SPECIAL_SUPPLY = {
     "신혼부부": {"pct": 140, "note": "혼인기간·자녀 여부에 따라 달라진다"},
     "생애최초": {"pct": 160, "note": "소득세 납부 이력 요건이 붙는 경우가 많다"},

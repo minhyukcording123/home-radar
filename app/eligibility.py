@@ -13,8 +13,13 @@ jisangfolio/cheongyak-auto(MIT) 의 판정 설계에서 출발했고, 조건을 
 
 그 결과:
   - 민영분양·무순위·오피스텔·민간임대 → 조건이 다 차면 '추천'까지 간다
-  - 공공분양·공공임대 → 소득·자산 공식 기준이 없어 항상 '확인 필요'에 머문다
-    (샘플 기준으로 적격을 확정하지 않기 때문이다 — 의도된 동작이다)
+  - 국민임대·행복주택·통합공공임대·신혼희망타운 등 → standards.py 의
+    2026년 공식 기준으로 소득·자산을 실제로 충족/불충족 판정한다.
+    단 공고문이 항상 우선하므로 todo 에 그 뜻을 남긴다.
+  - 공공분양(뉴:홈)·민영 특공 → 공식 기준을 확정하지 못해(official=False)
+    항상 '확인 필요'에 머문다 — 의도된 동작이다.
+  - 사업소득이 있으면 인정 방식(종합소득세 신고 기준 등)이 달라
+    합산값으로 적격을 확정하지 않는다 → 소득은 '미확인'.
 """
 from __future__ import annotations
 
@@ -23,13 +28,14 @@ from datetime import date
 from typing import Optional
 
 from . import profile as prof_mod
+from . import standards
 from .checks import (ELIGIBILITY, FILTER, LEVEL_IGNORE, MET, SIGNAL, UNKNOWN,
                      UNMET, Check, Verdict, filter_block, missing)
 from .models import Notice
 from .rules import (ACCOUNT_FIRST_RANK, AGE_RULES, ASSET_GUIDE,
-                    ASSET_GUIDE_SOURCE, INCOME_BASE_SOURCE, SPECIAL_SUPPLY,
-                    fmt_won, income_base, income_ratio, income_signal,
-                    net_assets)
+                    ASSET_GUIDE_SOURCE, RULE_SOURCES, SPECIAL_SUPPLY, fmt_won,
+                    income_base, income_ratio, income_signal, net_assets,
+                    recognized_monthly_income)
 
 # 모집이 아닌 후속 안내(결과·서류·계약)는 목록에서 뺀다
 NOISE = re.compile(r"당첨자|서류심사|서류제출|계약\s*(체결|안내|일정)|결과\s*(발표|안내|공고)"
@@ -64,6 +70,7 @@ TAG_WORDS = {
     "신혼희망타운": ("신혼희망타운", "신혼희망"),
     "사회주택": ("사회주택",),
     "무순위": UNRANKED_TYPES,
+    "노부모": ("노부모",),
     "특별공급": ("특별공급",),
     "1순위": ("1순위",),
     "2순위": ("2순위",),
@@ -83,7 +90,8 @@ ACCOUNT_LABEL = {
 }
 ACCOUNT_MODES = {"불필요만": ("사용", "가입만"), "가입만까지": ("사용",), "상관없음": ()}
 
-# 소득·자산 요건이 실제로 붙는 유형 (공식 기준이 없어 '미확인'으로 남는다)
+# 소득·자산 요건이 실제로 붙는 유형. 공식 기준(standards.py)이 있으면
+# 실제 판정, 없으면 '미확인'에 머문다.
 INCOME_SENSITIVE = ("공공분양", "공공임대")
 
 # '어떤 공고 기준이든 통과'로 볼 수 있는 임계값
@@ -341,38 +349,190 @@ def _check_residence(n: Notice, prof: dict, v: Verdict, today: date) -> None:
                     todo="공고문의 거주기간 요건 확인"))
 
 
-def _check_income(n: Notice, prof: dict, v: Verdict) -> None:
-    """소득 — 공식 기준이 없어 '참고 신호'로만 둔다 (항상 미확인).
+def _applicable_standard(v: Verdict, prof: dict,
+                         today: date) -> tuple[Optional[str], str]:
+    """공고 유형·태그 + 프로필 → 적용할 공식 기준 키.
 
-    샘플 기준은 checks.Check 가 구조적으로 '미확인'으로 내려앉힌다.
+    후보가 여럿이면(행복주택 계층 미상 등) 프로필로 좁힌다.
+    좁히지 못하면 (None, 이유) — 판정은 미확인에 머문다.
     """
-    ratio = income_ratio(prof)
-    base_manwon = income_base(prof.get("household_size", 1)) // 10_000
+    cands = standards.standards_for(v.kind, v.tags)
+    if not cands:
+        return None, ""
+    if len(cands) == 1:
+        return cands[0], ""
 
-    if v.kind not in INCOME_SENSITIVE and "특별공급" not in v.tags:
+    a = prof_mod.age(prof, today)
+    newlywed = prof_mod.is_newlywed(prof, today)
+    cs = set(cands)
+
+    if cs <= set(standards.HAPPY_HOUSE_KEYS):
+        # 행복주택 — 공고가 계층을 안 밝혔으면 내 프로필의 계층으로 좁힌다
+        if prof.get("student") and "대학생행복주택" in cs:
+            return "대학생행복주택", ""
+        if newlywed and "신혼행복주택" in cs:
+            return "신혼행복주택", ""
+        if a is not None and a >= 65 and "고령자행복주택" in cs:
+            return "고령자행복주택", ""
+        if a is not None and 19 <= a <= 39 and "청년행복주택" in cs:
+            return "청년행복주택", ""
+        return None, "행복주택 계층(청년·신혼·대학생·고령자)을 특정하지 못했다"
+
+    if cs <= set(standards.PURCHASE_RENTAL_KEYS):
+        if newlywed and "신혼부부매입임대" in cs:
+            return "신혼부부매입임대", ""
+        if a is not None and 19 <= a <= 39 and "청년매입임대" in cs:
+            return "청년매입임대", ""
+        return None, "매입임대 대상 계층을 특정하지 못했다"
+
+    # 특별공급이 여러 개 걸린 공고 — 내가 해당하는 특공 기준을 고른다
+    if int(prof.get("children") or 0) >= 2 and "다자녀특공" in cs:
+        return "다자녀특공", ""
+    if newlywed and "신혼부부특공" in cs:
+        return "신혼부부특공", ""
+    if "생애최초특공" in cs:
+        return "생애최초특공", ""
+    return cands[0], ""
+
+
+def _income_tier(n: Notice, std_key: Optional[str]) -> tuple[Optional[str], bool]:
+    """전용면적 tier (국민임대 60㎡ 초과 100% 등) — (tier, 미확정 여부).
+
+    공고의 주택형 전용면적을 알면 확정하고, 모르면 상한을 열어 둔다
+    (60㎡ 초과 세대가 섞여 있을 수 있는데 70% 초과라고 제외하면 안 된다).
+    """
+    if std_key is None or not standards.STANDARDS[std_key].get("income"):
+        return None, False
+    tiers = standards.STANDARDS[std_key]["income"]["tiers"]
+    if not tiers:
+        return None, False
+
+    sizes = []
+    for a in (n.areas or []):
+        try:
+            sizes.append(float(a.exclusive))
+        except (TypeError, ValueError):
+            pass
+    if sizes and all(s <= 60 for s in sizes):
+        return None, False          # 전부 60㎡ 이하 — 기본 % 확정
+    if sizes and all(s > 60 for s in sizes):
+        return "전용60초과", False  # 전부 초과 — tier % 확정
+    return None, True               # 모름/혼재 — 상한만 열어 둔다
+
+
+def _check_income(n: Notice, prof: dict, v: Verdict, today: date,
+                  std_key: Optional[str], std_note: str) -> None:
+    """소득 — 공식 기준(standards.py)이 있으면 실제 판정한다.
+
+    원칙:
+      * 근로소득만 있으면 공식 기준과 비교해 충족/불충족을 낸다.
+      * 사업소득이 있으면 인정 방식(종합소득세 신고 기준 등)이 달라
+        **합산값으로 적격을 확정하지 않는다** — 참고로 보여주고 미확인.
+      * official=False 기준(뉴:홈 등)은 checks.py 가 자동으로 미확인 처리.
+      * 공고문에 별도 기준이 있으면 공고문이 우선 — todo 에 남긴다.
+    """
+    hh = prof.get("household_size", 1)
+    ratio = income_ratio(prof)
+    base_manwon = income_base(hh) // 10_000
+
+    spec = standards.STANDARDS[std_key].get("income") if std_key else None
+    if std_key and spec is None:
+        # 민영 일반공급·무순위 — 소득 요건 자체가 없다
         v.income = {"applies": False, "ratio": ratio,
-                    "note": f"{v.kind} 일반공급은 소득 요건이 없는 경우가 많다"}
+                    "note": f"{standards.STANDARDS[std_key]['label']}"
+                            " — 소득 요건 없음"}
         return
 
-    limit, label = _special_limit(v)
-    sig = income_signal(ratio, limit)
+    if std_key is None:
+        if v.kind not in INCOME_SENSITIVE and "특별공급" not in v.tags:
+            v.income = {"applies": False, "ratio": ratio,
+                        "note": f"{v.kind} 일반공급은 소득 요건이 없는 경우가 많다"}
+            return
+        _income_without_standard(prof, v, ratio, base_manwon, std_note)
+        return
+
+    # ---- 공식 기준 적용 ----
+    std = standards.STANDARDS[std_key]
+    src_key = std["source"]
+    tier, tier_uncertain = _income_tier(n, std_key)
+    # 맞벌이 여부는 프로필로 알 수 없다 — None 으로 두면 밴드 상한이 열린다
+    dual = None if (spec["dual_pct"] and prof.get("marital") != "미혼") else False
+    limit_lo, _, _ = standards.income_limit(std_key, hh, tier=tier)
+
     v.income = {
-        "applies": True, "ratio": ratio, "limit_pct": limit, "label": label,
-        "signal": sig, "base_manwon": base_manwon,
-        "note": (f"가구원 {prof.get('household_size', 1)}인 도시근로자 월평균소득"
-                 f" {base_manwon:,}만원 기준"),
+        "applies": True, "ratio": ratio, "label": std["label"],
+        "limit_pct": spec["pct"], "signal": income_signal(ratio, spec["pct"]),
+        "base_manwon": base_manwon,
+        "note": (f"{std['label']} 공식 기준 적용 — 가구원 {hh}인 한도 "
+                 f"월 {limit_lo:,}원 ({spec['scope']} 소득 기준)"),
     }
 
+    biz = int(prof.get("income_business") or 0)
+    inc = recognized_monthly_income(prof)          # 만원
+    if inc is None:
+        v.add(missing("소득", "근로소득·사업소득"))
+        return
+    inc_won = int(inc) * 10_000
+
+    if biz > 0:
+        # 사업소득 인정액은 단순 합산과 다르다 — 합산으로 확정하지 않는다
+        v.add(Check(
+            "소득", UNKNOWN,
+            f"근로+사업 단순 합산 월 {inc_won:,}원 (참고) / "
+            f"{std['label']} 한도 월 {limit_lo:,}원 — 사업소득은 "
+            "인정 방식이 달라 합산값으로 판정하지 않는다",
+            source_key=src_key,
+            todo="사업소득 인정액은 종합소득세 신고 기준으로 산정된다 — "
+                 "공고문·LH 상담으로 확인"))
+        return
+
+    status_txt, detail, todo = standards.compare_income(
+        std_key, hh, inc_won, dual=dual, tier=tier,
+        tier_uncertain=tier_uncertain)
+    status = {"충족": MET, "불충족": UNMET}.get(status_txt, UNKNOWN)
+    # official=False 기준은 어차피 미확인으로 내려앉는다 — 그때 detail 에
+    # '충족'이라고 적혀 있으면 어긋나 보이므로 참고 표현으로 바꾼다
+    official = bool(RULE_SOURCES.get(src_key, {}).get("official"))
+    suffix = {MET: " → 충족" if official else " → 기준 이하 (참고)",
+              UNMET: " → 불충족" if official else " → 기준 초과 (참고)",
+              UNKNOWN: ""}[status]
+    detail = detail.replace("내 소득", "내 근로소득") + suffix
+    if status != UNKNOWN and not todo:
+        todo = "공고문에 별도 소득 기준이 있으면 공고문이 우선한다"
+    v.add(Check("소득", status, detail, source_key=src_key, todo=todo))
+
+
+def _income_without_standard(prof: dict, v: Verdict, ratio, base_manwon: int,
+                             std_note: str) -> None:
+    """공식 기준을 특정하지 못한 소득 요건 유형 — 미확인에 머문다."""
+    v.income = {
+        "applies": True, "ratio": ratio, "limit_pct": None, "label": "",
+        "signal": "확인", "base_manwon": base_manwon,
+        "note": (f"가구원 {prof.get('household_size', 1)}인 도시근로자 "
+                 f"월평균소득 {base_manwon:,}만원 기준"),
+    }
     if ratio is None:
         v.add(missing("소득", "근로소득·사업소득"))
         return
 
-    detail = f"입력 소득은 도시근로자 월평균소득의 {ratio}%"
-    if limit:
-        detail += f" ({label} 상한 {limit}% · 신호 {sig})"
-    v.add(Check("소득", MET if sig in ("여유", "경계") else UNMET, detail,
-                source_key=INCOME_BASE_SOURCE,
-                todo="공고문의 연도별 소득 기준으로 확인 필요"))
+    if v.kind == "민영분양":
+        # 민영 특공 — 공식 확정값이 없어 샘플 %로 신호만 만든다 (자동 미확인)
+        limit, label = _special_limit(v)
+        sig = income_signal(ratio, limit)
+        v.income.update({"limit_pct": limit, "label": label, "signal": sig})
+        detail = f"입력 소득은 도시근로자 월평균소득의 {ratio}%"
+        if limit:
+            detail += f" ({label} 참고 상한 {limit}% · 신호 {sig})"
+        v.add(Check("소득", MET if sig in ("여유", "경계") else UNMET, detail,
+                    source_key="sample-special",
+                    todo="공고문의 특별공급 소득 기준으로 확인 필요"))
+        return
+
+    v.add(Check("소득", UNKNOWN,
+                "소득 요건이 있는 유형이지만 적용할 공식 기준을 특정하지 못했다"
+                + (f" — {std_note}" if std_note else ""),
+                source_key="notice",
+                todo="공고문의 소득 기준(% ·산정 대상)으로 확인"))
 
 
 def _special_limit(v: Verdict) -> tuple[Optional[int], str]:
@@ -384,21 +544,117 @@ def _special_limit(v: Verdict) -> tuple[Optional[int], str]:
     return None, ""
 
 
-def _check_assets(n: Notice, prof: dict, v: Verdict) -> None:
-    """총자산·자동차가액 — 역시 샘플 기준이라 '미확인' 신호로만 둔다."""
+def _check_assets(n: Notice, prof: dict, v: Verdict,
+                  std_key: Optional[str]) -> None:
+    """총자산·부동산·자동차 — 공식 기준이 있으면 항목별로 실제 판정한다."""
+    na = net_assets(prof)                      # 순자산(자산-부채, 만원)
+    gross = prof.get("assets")                 # 총자산 입력값 (만원)
+    car = int(prof.get("car") or 0)
+
+    lims = standards.asset_limits(std_key) if std_key else None
+    if lims and not lims["applies"]:
+        v.asset = {"applies": False,
+                   "note": f"{lims['label']} — 총자산 요건 없음"}
+        return
+
+    if lims is None:
+        _assets_without_standard(prof, v, na, car)
+        return
+
+    src_key = lims["source"]["key"]
+    label = lims["label"]
+    met_only = lims["met_only"]
+    # official=False 기준은 미확인으로 내려앉는다 — detail 의 단정 표현을 피한다
+    ok_word = "충족" if lims["source"]["official"] else "기준 이하 (참고)"
+    over_word = "초과" if lims["source"]["official"] else "기준 초과 (참고)"
+    v.asset = {
+        "applies": True, "net_assets": na, "car": car,
+        "guide": {"assets": lims["total"] or lims["estate"], "car": lims["car"]},
+        "note": f"{label} 공식 자산 기준 적용 ({lims['source']['asof'] or '기준일 공고문 확인'})",
+    }
+
+    # ---- 총자산 ----
+    if lims["total"] is not None:
+        if na is None:
+            v.add(missing("자산", "총자산"))
+        elif na <= lims["total"]:
+            v.add(Check("총자산", MET,
+                        f"{label} 총자산 기준 {fmt_won(lims['total'])} / "
+                        f"내 순자산(자산-부채) {fmt_won(na)} → {ok_word}",
+                        source_key=src_key,
+                        todo="공고문에 별도 자산 기준이 있으면 공고문이 우선한다"))
+        elif met_only:
+            # 더 느슨한 순위·특례가 공존 — 초과로 탈락을 확정하지 않는다
+            v.add(Check("총자산", UNKNOWN,
+                        f"{label} 기본 자산 기준 {fmt_won(lims['total'])} 초과 "
+                        f"(내 순자산 {fmt_won(na)}) — 순위별 기준이 달라 확정 불가",
+                        source_key=src_key,
+                        todo="순위별 자산 기준이 달라 공고문·LH 상담으로 확인"))
+        else:
+            v.add(Check("총자산", UNMET,
+                        f"{label} 총자산 기준 {fmt_won(lims['total'])} / "
+                        f"내 순자산 {fmt_won(na)} → {over_word}",
+                        source_key=src_key,
+                        todo="공고문에 별도 자산 기준이 있으면 공고문이 우선한다"))
+    elif lims["estate"] is not None:
+        # 부동산가액만 보는 유형 — 프로필은 부동산을 분리 입력하지 않으므로
+        # '총자산 전체 ≤ 부동산 한도'일 때만 충족을 확정할 수 있다
+        if gross in (None, ""):
+            v.add(missing("자산", "총자산"))
+        elif int(gross) <= lims["estate"]:
+            v.add(Check("부동산", MET,
+                        f"{label} 부동산 기준 {fmt_won(lims['estate'])} / "
+                        f"총자산 전체({fmt_won(int(gross))})가 기준 이하라 "
+                        f"부동산가액도 이하 → {ok_word}",
+                        source_key=src_key))
+        else:
+            v.add(Check("부동산", UNKNOWN,
+                        f"{label}은 부동산가액({fmt_won(lims['estate'])})만 본다 — "
+                        f"총자산 {fmt_won(int(gross))} 중 부동산 비중을 알 수 없다",
+                        source_key=src_key,
+                        todo="보유 부동산가액을 공고문 기준으로 따로 확인"))
+
+    # ---- 자동차 ----
+    if lims["car_forbidden"]:
+        v.add(Check("자동차", UNMET if car > 0 else MET,
+                    f"{label}은 자동차 미보유 요건"
+                    + (f" — 보유 차량 {fmt_won(car)}" if car > 0 else " — 미보유"),
+                    source_key=src_key))
+    elif lims["car"] is not None:
+        if car > lims["car"]:
+            status = UNKNOWN if met_only else UNMET
+            v.add(Check("자동차가액", status,
+                        f"{label} 자동차 기준 {fmt_won(lims['car'])} / "
+                        f"내 차량 {fmt_won(car)} → {over_word}"
+                        + (" — 순위별 기준 확인 필요" if met_only else ""),
+                        source_key=src_key,
+                        todo="공고문에 별도 자동차 기준이 있으면 공고문이 우선한다"))
+        elif car:
+            v.add(Check("자동차가액", MET,
+                        f"{label} 자동차 기준 {fmt_won(lims['car'])} / "
+                        f"내 차량 {fmt_won(car)} → {ok_word}",
+                        source_key=src_key))
+    elif car:
+        # 기준 미기재(고령자 행복주택 등) — 보유 시에만 확인을 요구한다
+        v.add(Check("자동차가액", UNKNOWN,
+                    f"{label}의 자동차가액 기준이 공식 페이지에 없다 "
+                    f"(내 차량 {fmt_won(car)})",
+                    source_key=src_key,
+                    todo="공고문의 자동차가액 기준 확인"))
+
+
+def _assets_without_standard(prof: dict, v: Verdict, na, car: int) -> None:
+    """공식 기준을 특정하지 못한 공공 유형 — 샘플 참고 신호만 (자동 미확인)."""
     guide = ASSET_GUIDE.get(v.kind)
     if guide is None:
         v.asset = {"applies": False,
                    "note": f"{v.kind}은 총자산 요건이 없는 경우가 많다"}
         return
 
-    na = net_assets(prof)
-    car = int(prof.get("car") or 0)
     v.asset = {
         "applies": True, "net_assets": na, "car": car, "guide": guide,
         "note": "공공 유형은 총자산·자동차가액 상한이 있다 (연도·공고별로 다름)",
     }
-
     if na is None:
         v.add(missing("자산", "총자산"))
     else:
@@ -407,13 +663,84 @@ def _check_assets(n: Notice, prof: dict, v: Verdict) -> None:
                     f"순자산 {fmt_won(na)} vs 참고 상한 {fmt_won(guide['assets'])}",
                     source_key=ASSET_GUIDE_SOURCE,
                     todo="공고문의 연도별 자산 기준으로 확인 필요"))
-
     if car:
         over = car > guide["car"]
         v.add(Check("자동차가액", UNMET if over else MET,
                     f"{fmt_won(car)} vs 참고 상한 {fmt_won(guide['car'])}",
                     source_key=ASSET_GUIDE_SOURCE,
                     todo="공고문의 연도별 자동차 기준으로 확인 필요"))
+
+
+def _check_household_comp(prof: dict, v: Verdict, today: date,
+                          std_key: Optional[str], std_note: str) -> None:
+    """세대구성 — 적용한 계층 기준을 명시하고, 계층 미상이면 미확인.
+
+    연령·신혼·다자녀처럼 공고 태그로 이미 검사된 것(_check_age,
+    _check_target_group)은 중복해서 만들지 않는다. 여기서는 공고가 계층을
+    안 밝혀 프로필로 기준을 고른 경우의 근거와, 태그 검사가 못 다루는
+    요건(미혼·부양기간 등)만 다룬다.
+    """
+    if std_note:
+        # 계층 후보가 여럿인데 프로필로도 못 좁혔다 — 세대구성부터 미확인
+        v.add(Check("세대구성", UNKNOWN, std_note, source_key="notice",
+                    todo="공고문에서 모집 계층과 내 해당 여부 확인"))
+        return
+    if std_key is None:
+        return
+    desc = standards.STANDARDS[std_key].get("household", "")
+
+    if std_key == "청년행복주택":
+        # 혼인 요건은 공식 페이지 전사에 없어 미혼이 아닐 때만 확인을 요구한다
+        if prof.get("marital") == "미혼":
+            v.add(Check("세대구성", MET, f"{desc} — 미혼 단독가구로 판정",
+                        source_key="profile"))
+        else:
+            v.add(Check("세대구성", UNKNOWN,
+                        f"{desc} — 혼인 상태({prof.get('marital')})의 "
+                        "청년 계층 해당 여부는 공고문 기준",
+                        source_key="notice", todo="공고문의 청년 계층 요건 확인"))
+    elif std_key == "청년매입임대":
+        # LH 공식 페이지가 '미혼 청년'을 명시한다 — 기혼이면 구조적으로 제외
+        v.add(Check("세대구성",
+                    MET if prof.get("marital") == "미혼" else UNMET,
+                    f"{desc} · 현재 {prof.get('marital')}",
+                    source_key="lh-youth-purchase"))
+    elif std_key == "대학생행복주택":
+        v.add(Check("세대구성", MET, f"{desc} — 대학(원)생으로 판정",
+                    source_key="profile"))
+    elif std_key in ("신혼행복주택", "신혼부부매입임대") \
+            and "신혼부부" not in v.tags:
+        # 공고가 계층을 안 밝혀 프로필(신혼)로 골랐다 — 근거를 남긴다
+        v.add(Check("세대구성", MET, f"적용 기준: {desc}", source_key="profile"))
+    elif std_key == "고령자행복주택" and "고령자" not in v.tags:
+        v.add(Check("세대구성", MET, f"적용 기준: {desc}", source_key="profile"))
+    elif std_key == "생애최초특공":
+        v.add(Check("세대구성", UNKNOWN,
+                    "생애최초 요건(세대원 전원 주택 소유 이력 없음·소득세 "
+                    "납부 이력 등)은 입력만으로 확정할 수 없다",
+                    source_key="notice", todo="공고문의 생애최초 요건 확인"))
+    elif std_key == "노부모특공":
+        v.add(Check("세대구성", UNKNOWN,
+                    f"{desc} — 부양 기간·세대 구성은 입력만으로 확정할 수 없다",
+                    source_key="notice", todo="공고문의 노부모부양 요건 확인"))
+
+
+def _check_extra(n: Notice, prof: dict, v: Verdict,
+                 std_key: Optional[str]) -> None:
+    """기타 공고별 요건 — 조건부 요건(모기지 등)이 걸릴 때만 미확인으로 띄운다."""
+    if std_key is None:
+        return
+    std = standards.STANDARDS[std_key]
+    for extra in std.get("extra", ()):
+        if std_key == "신혼희망타운":
+            lims = standards.asset_limits(std_key)
+            lo = n.price_min
+            # 주택가격이 총자산기준 이하로 확인되면 모기지 요건이 안 붙는다
+            if lo is not None and lims["total"] and lo <= lims["total"]:
+                continue
+        v.add(Check("기타 요건", UNKNOWN, extra,
+                    source_key=std["source"],
+                    todo="공고문에서 해당 여부 확인"))
 
 
 # ---------------------------------------------------------------- 종합
@@ -454,8 +781,13 @@ def judge(n: Notice, prof: dict, today: date) -> Verdict:
     _check_homeless(n, prof, v)
     _check_account(n, prof, v, today)
     _check_residence(n, prof, v, today)
-    _check_income(n, prof, v)
-    _check_assets(n, prof, v)
+
+    # 소득·자산·세대구성·기타는 같은 공식 기준(standards.py)을 공유한다
+    std_key, std_note = _applicable_standard(v, prof, today)
+    _check_household_comp(prof, v, today, std_key, std_note)
+    _check_income(n, prof, v, today, std_key, std_note)
+    _check_assets(n, prof, v, std_key)
+    _check_extra(n, prof, v, std_key)
     _check_price(n, prof, v)
 
     v.settle()
