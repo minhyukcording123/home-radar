@@ -12,7 +12,9 @@ import re
 from typing import Optional
 
 import httpx
+from bs4 import BeautifulSoup
 
+from ..rules import fmt_won
 from ..util import APPLYHOME_HOST, CALENDAR_PAGE, new_client, parse_date, parse_period
 
 APT_DETAIL = "/ai/aia/selectAPTLttotPblancDetail.do"
@@ -102,15 +104,15 @@ def _supply_total(html: str) -> str:
     return ""
 
 
-def _price(html: str) -> str:
-    """공급금액 표에서 대표 금액 범위를 한 줄로 요약한다 — 어디까지나 참고값이다.
+def _price_range(html: str) -> tuple[str, Optional[int], Optional[int]]:
+    """공급금액 표에서 금액 범위를 (표시문자열, 최소, 최대) 로 — 어디까지나 참고값이다.
 
     같은 표에 전용면적·연도 같은 숫자가 섞여 있어 하한이 오염되기 쉽다.
     그래서 분양가로 볼 수 있는 구간(5천만원 이상)만 남긴다.
     """
     start = html.find("공급금액")
     if start < 0:
-        return ""
+        return "", None, None
     end = html.find("기타사항", start)
     section = html[start: end if end > start else start + 20000]
     nums = []
@@ -123,9 +125,136 @@ def _price(html: str) -> str:
         if 5_000 <= v <= 500_000:
             nums.append(v)
     if not nums:
-        return ""
+        return "", None, None
     lo, hi = min(nums), max(nums)
-    return f"{lo:,}만원" if lo == hi else f"{lo:,}~{hi:,}만원"
+    return (fmt_won(lo) if lo == hi else f"{fmt_won(lo)} ~ {fmt_won(hi)}"), lo, hi
+
+
+_AREA_COLS = {
+    "name": ("주택형", "타입", "모델"),
+    "exclusive": ("주거전용", "주택공급면적", "전용면적", "공급면적", "전용"),
+    # 세대수는 특별/일반으로 쪼개진 표가 많다. 보여줄 값은 합계가 가장 쓸모 있어서
+    # '계' 열을 먼저 찾고, 없으면 전체 세대수 → 일반공급 순으로 내려간다.
+    "units": ("계", "공급세대수", "세대수", "일반공급"),
+}
+
+
+def _table_grid(table) -> list[list[tuple[str, bool]]]:
+    """rowspan/colspan 을 펼쳐 표를 격자로 만든다.
+
+    공고 상세의 '공급대상' 표는 주택형·면적을 rowspan 으로 묶어 쓴다.
+    그래서 `tr.find_all('td')[i]` 로 읽으면 행마다 열이 밀려
+    '128 / 230 / 358' 처럼 엉뚱한 값이 들어온다. HTML 표 배치 규칙대로
+    펼쳐야 열 이름과 값이 맞는다.
+
+    각 칸은 (텍스트, th 인가) 로 담는다.
+    """
+    taken: dict[tuple[int, int], tuple[str, bool]] = {}
+    for r, tr in enumerate(table.find_all("tr")):
+        c = 0
+        for cell in tr.find_all(["td", "th"], recursive=False) or tr.find_all(["td", "th"]):
+            while (r, c) in taken:
+                c += 1
+            text = cell.get_text(" ", strip=True)
+            is_th = cell.name == "th"
+            try:
+                rs = max(1, int(cell.get("rowspan") or 1))
+                cs = max(1, int(cell.get("colspan") or 1))
+            except ValueError:
+                rs = cs = 1
+            for dr in range(rs):
+                for dc in range(cs):
+                    taken[(r + dr, c + dc)] = (text, is_th)
+            c += cs
+    if not taken:
+        return []
+    rows = max(k[0] for k in taken) + 1
+    cols = max(k[1] for k in taken) + 1
+    return [[taken.get((r, c), ("", False)) for c in range(cols)]
+            for r in range(rows)]
+
+
+def _areas(html: str) -> list[dict]:
+    """'공급대상' 표에서 주택형 / 공급면적 / 세대수를 뽑는다.
+
+    표 모양이 공고마다 달라 열 위치가 아니라 **열 이름**으로 찾는다.
+    머리글이 2줄로 나뉘는 표(공급면적 → 주거전용/주거공용)도 있어
+    앞쪽 th 행들을 합쳐서 열 이름을 만든다.
+    """
+    start = html.find("공급대상")
+    if start < 0:
+        return []
+    end = -1
+    for marker in ("공급금액", "공급내역", "기타사항"):
+        end = html.find(marker, start)
+        if end > start:
+            break
+    if end <= start:
+        end = start + 30000
+    section = html[start:end]
+
+    table = BeautifulSoup(section, "html.parser").find("table")
+    if table is None:
+        return []
+    grid = _table_grid(table)
+    if not grid:
+        return []
+
+    # 앞쪽의 th 로만 이뤄진 행들을 머리글로 본다
+    head_rows = 0
+    for row in grid:
+        if row and all(is_th or not txt for txt, is_th in row):
+            head_rows += 1
+        else:
+            break
+    if head_rows == 0:
+        return []
+
+    cols = len(grid[0])
+    heads = []
+    for c in range(cols):
+        parts = []
+        for r in range(head_rows):
+            txt = grid[r][c][0]
+            if txt and txt not in parts:
+                parts.append(txt)
+        heads.append(" ".join(parts))
+
+    # 열 이름 후보는 **적어 둔 순서가 우선순위**다.
+    # 그래서 바깥 루프가 단어, 안쪽 루프가 머리글이어야 한다.
+    # (반대로 돌리면 '공급세대수 계' 대신 먼저 나오는 '공급세대수 특별공급'이 잡힌다)
+    idx: dict[str, int] = {}
+    for field, words in _AREA_COLS.items():
+        hit = None
+        for w in words:
+            for i, h in enumerate(heads):
+                if i in idx.values() or w not in h:
+                    continue
+                hit = i
+                break
+            if hit is not None:
+                break
+        if hit is not None:
+            idx[field] = hit
+    if "name" not in idx and "exclusive" not in idx:
+        return []
+
+    out: list[dict] = []
+    for row in grid[head_rows:]:
+        rec = {f: (row[i][0] if i < len(row) else "") for f, i in idx.items()}
+        rec = {"name": rec.get("name", ""), "exclusive": rec.get("exclusive", ""),
+               "units": rec.get("units", "")}
+        if not any(rec.values()):
+            continue
+        # 숫자가 전혀 없는 행(합계 안내문 등)은 버린다
+        if not any(re.search(r"\d", v) for v in rec.values()):
+            continue
+        # 합계 행은 주택형이 '계'·'합계' 로 들어온다
+        if rec["name"] in ("계", "합계", "소계", "총계"):
+            continue
+        if rec not in out:
+            out.append(rec)
+    return out[:30]
 
 
 def fetch(house_manage_no: str, pblanc_no: str, house_secd: str = "01",
@@ -161,6 +290,8 @@ def fetch(house_manage_no: str, pblanc_no: str, house_secd: str = "01",
                 begins.append(p["begin"])
                 ends.append(p["end"])
 
+        price_text, price_min, price_max = _price_range(html)
+
         return {
             "location": _field(html, "공급위치"),
             "total_units": _supply_total(html),
@@ -169,7 +300,10 @@ def fetch(house_manage_no: str, pblanc_no: str, house_secd: str = "01",
             "announce": (parse_date(announce_raw).isoformat()
                          if parse_date(announce_raw) else ""),
             "move_in": _field(html, "입주예정월"),
-            "price": _price(html),
+            "price": price_text,
+            "price_min": price_min,
+            "price_max": price_max,
+            "areas": _areas(html),
             "receptions": receptions,
             "begin": min(begins) if begins else "",
             "end": max(ends) if ends else "",

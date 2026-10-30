@@ -1,9 +1,11 @@
 """HOME RADAR 웹앱 — FastAPI.
 
-  uvicorn app.main:app --reload --port 8000
+  uvicorn app.main:app --reload --port 8777
 
 수집(refresh)은 네트워크를 수십 번 때리므로 백그라운드 스레드에서 돌리고
 /api/refresh/status 로 진행 상황을 본다. 그 외 조회는 전부 로컬 캐시라 즉시 응답한다.
+
+개인정보는 이 프로세스 밖으로 나가지 않는다. 바인딩 기본값도 127.0.0.1 이다.
 """
 from __future__ import annotations
 
@@ -15,13 +17,14 @@ from fastapi import Body, FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse, JSONResponse
 
 from . import collect, profile, store
-from .rules import MONTHLY_INCOME_BASE, SPECIAL_SUPPLY, income_base
+from .rules import (ASSET_GUIDE, MONTHLY_INCOME_BASE, RULE_SOURCES,
+                    RULES_VERSION, SPECIAL_SUPPLY)
 from .sources import applyhome_detail
 from .util import SIDO, now_kst, today_kst
 
 WEB = Path(__file__).resolve().parent / "web"
 
-app = FastAPI(title="HOME RADAR", version="0.1.0")
+app = FastAPI(title="HOME RADAR", version="0.2.0")
 
 # ---------------- 수집 작업 상태 ----------------
 _job_lock = threading.Lock()
@@ -29,14 +32,24 @@ _job: dict = {"running": False, "started_at": None, "finished_at": None,
               "result": None, "error": None}
 
 
-def _run_refresh(back: int, ahead: int, enrich: bool) -> None:
+def _run_refresh(enrich: bool) -> None:
     try:
-        payload = collect.refresh(back=back, ahead=ahead, enrich=enrich)
+        p = collect.refresh(enrich=enrich)
+        srcs = p.get("sources") or {}
         with _job_lock:
             _job["result"] = {
-                "count": payload.get("count"),
-                "fetched_at": payload.get("fetched_at"),
-                "warnings": payload.get("warnings") or [],
+                "count": p.get("count"),
+                "fetched_at": p.get("fetched_at"),
+                "new_count": len(p.get("new_keys") or []),
+                "revised_count": len(p.get("revised_keys") or []),
+                "merged_count": len(p.get("merged") or []),
+                "corrections_count": len(p.get("corrections") or []),
+                "baseline_sources": p.get("baseline_sources") or [],
+                "failed_sources": [sid for sid, st in srcs.items()
+                                   if st.get("state") == "실패"],
+                "skipped_sources": [sid for sid, st in srcs.items()
+                                    if st.get("state") == "건너뜀"],
+                "warnings": p.get("warnings") or [],
             }
             _job["error"] = None
     except Exception as e:  # noqa: BLE001
@@ -62,14 +75,40 @@ def api_view(include_closed: bool = Query(False, description="마감된 공고�
     prof = profile.load()
     view = collect.build_view(prof, today_kst(), include_closed=include_closed)
     view["profile_saved"] = profile.exists()
+    view["rules_version"] = RULES_VERSION
     return view
 
 
+@app.get("/api/sources")
+def api_sources():
+    """수집원별 설정·키·robots 확인 결과·마지막 성공 시각."""
+    return {"sources": collect.source_overview(),
+            "config": collect.load_config()}
+
+
+@app.get("/api/rules")
+def api_rules():
+    """판정에 쓰는 규칙의 출처·기준일·공식 여부 — 화면에서 근거를 보여주기 위해."""
+    return {
+        "version": RULES_VERSION,
+        "sources": RULE_SOURCES,
+        "income_base": MONTHLY_INCOME_BASE,
+        "special_supply": SPECIAL_SUPPLY,
+        "asset_guide": ASSET_GUIDE,
+        "disclaimer": ("official=false 인 기준은 샘플 값이다. "
+                       "HOME RADAR 는 이 값으로 적격·부적격을 확정하지 않고 "
+                       "'미확인' 신호로만 쓴다."),
+    }
+
+
+# ---------------- 내 조건 ----------------
 @app.get("/api/profile")
 def api_profile_get():
+    prof = profile.load()
     return {
-        "profile": profile.load(),
+        "profile": prof,
         "saved": profile.exists(),
+        "derived": profile.derived(prof, today_kst()),
         "meta": {
             "sido": SIDO,
             "marital": ["미혼", "예비신혼", "신혼", "기혼"],
@@ -78,6 +117,7 @@ def api_profile_get():
             "want_kinds": list(profile.DEFAULT["want"].keys()),
             "income_base": MONTHLY_INCOME_BASE,
             "special_supply": SPECIAL_SUPPLY,
+            "rules_version": RULES_VERSION,
         },
     }
 
@@ -86,21 +126,34 @@ def api_profile_get():
 def api_profile_put(payload: dict = Body(...)):
     prof = profile.save(payload)
     return {"profile": prof, "saved": True,
-            "income_base": income_base(prof.get("household_size", 1))}
+            "derived": profile.derived(prof, today_kst())}
+
+
+# ---------------- 북마크 ----------------
+@app.post("/api/bookmark")
+def api_bookmark(payload: dict = Body(...)):
+    key = (payload or {}).get("key")
+    if not key:
+        raise HTTPException(status_code=400, detail="key 가 필요합니다")
+    return store.toggle_bookmark(str(key))
+
+
+@app.get("/api/bookmarks")
+def api_bookmarks():
+    return {"keys": store.load_bookmarks()}
 
 
 # ---------------- 수집 ----------------
 @app.post("/api/refresh")
-def api_refresh(back: int = Query(1, ge=0, le=6),
-                ahead: int = Query(6, ge=0, le=12),
-                enrich: bool = Query(True)):
+def api_refresh(enrich: bool = Query(True)):
     with _job_lock:
         if _job["running"]:
             return JSONResponse({"started": False, "reason": "이미 수집 중입니다"},
                                 status_code=409)
-        _job.update({"running": True, "started_at": now_kst().isoformat(timespec="seconds"),
+        _job.update({"running": True,
+                     "started_at": now_kst().isoformat(timespec="seconds"),
                      "finished_at": None, "result": None, "error": None})
-    threading.Thread(target=_run_refresh, args=(back, ahead, enrich), daemon=True).start()
+    threading.Thread(target=_run_refresh, args=(enrich,), daemon=True).start()
     return {"started": True}
 
 
@@ -126,13 +179,28 @@ def api_detail(house_manage_no: str, pblanc_no: str, house_secd: str = "01",
     return {"cached": False, **d}
 
 
+@app.get("/api/revisions")
+def api_revisions(key: str | None = None):
+    """공고 수정 이력."""
+    if key:
+        return {"key": key, "history": store.revision_history(key)}
+    store_all = store.load_revisions()
+    return {"count": len(store_all),
+            "changed": {k: v.get("history", [])[-3:]
+                        for k, v in store_all.items() if v.get("history")}}
+
+
 @app.get("/api/health")
 def api_health():
     cached = store.load_notices()
+    meta = store.seen_meta()
     return {
         "ok": True,
         "today": today_kst().isoformat(),
         "cached_count": (cached or {}).get("count", 0),
         "fetched_at": (cached or {}).get("fetched_at"),
         "profile_saved": profile.exists(),
+        "rules_version": RULES_VERSION,
+        "runs": meta.get("runs", 0),
+        "baselines": meta.get("baselines", {}),
     }

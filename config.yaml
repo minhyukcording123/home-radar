@@ -1,0 +1,32 @@
+# 수집 설정 — 비밀값은 여기 두지 않는다.
+# API 키는 환경변수로 넣는다 (app/sources/registry.py 의 key_env 참고):
+#   APPLYHOME_API_KEY   청약홈 공식 오픈API  https://www.data.go.kr/data/15098547/openapi.do
+#   LH_API_KEY          LH 분양임대공고문    https://www.data.go.kr/data/15058530/openapi.do
+
+sources:
+  applyhome:
+    enabled: true
+    back_months: 1       # 지난 몇 개월까지
+    ahead_months: 6      # 앞으로 몇 개월까지
+    detail_limit: 40     # 상세까지 보강할 공고 수 (접수 중/임박 우선)
+
+  lh:
+    enabled: true        # LH_API_KEY 가 없으면 자동으로 '키 미설정' 처리된다
+    upp_types: ["06", "13"]   # 06 임대주택, 13 주거복지(매입·전세임대·든든전세)
+    max_pages: 5
+    detail_limit: 30
+
+  sh:
+    enabled: true
+    pages: 3
+
+  youth:
+    enabled: true
+    pages: 2
+
+  # SH 홈페이지 게시판(i-sh.co.kr)
+  # robots.txt 가 ClaudeBot 등 AI 에이전트를 명시적으로 Disallow 하고 있어
+  # 기본값을 끔으로 둔다. 켤지는 사용자가 판단한다.
+  ish:
+    enabled: false
+    pages: 2

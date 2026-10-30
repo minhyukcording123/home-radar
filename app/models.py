@@ -2,8 +2,11 @@
 
 cheongyak-auto(MIT) 의 `cheong/models.py` Notice 설계를 각색했다.
 원본과 다른 점:
-  - 청약홈 캘린더는 '일정 행' 단위로 오므로 events 를 추가해 공고 단위로 묶는다
-  - 상세 조회로 채워지는 필드(detail)를 분리해 지연 로딩할 수 있게 했다
+  - 캘린더가 '일정 행' 단위로 오므로 events 를 두고 공고 단위로 묶는다
+  - 접수 시작 / 접수 마감 / 당첨 발표를 따로 들고 D-day 도 따로 계산한다
+  - 공급금액을 숫자(price_min/price_max)로 들고 있어 분양가 필터와 억 단위 표시에 쓴다
+  - 공급면적(areas)을 담는다
+  - source_id 로 수집원(청약홈/LH/SH)을 구분한다
 """
 from __future__ import annotations
 
@@ -14,7 +17,7 @@ from typing import Optional
 from .util import iso
 
 # 청약홈 캘린더 RCEPT_SE (접수 구분) 코드.
-# 프런트 레전드와 실제 수집 데이터(2026-10-30 기준 census)로 의미를 확정했다.
+# 프런트 레전드와 실제 수집 데이터 census 로 의미를 확정했다.
 RCEPT_SE = {
     "01": "특별공급",
     "02": "1순위",
@@ -55,32 +58,49 @@ class Event:
 
 
 @dataclass
+class Area:
+    """공급 면적 한 줄 (주택형 / 전용면적 / 세대수)."""
+    name: str = ""          # 주택형 (084.9876A)
+    exclusive: str = ""     # 전용면적
+    units: str = ""         # 공급 세대수
+
+    def to_dict(self):
+        return {"name": self.name, "exclusive": self.exclusive, "units": self.units}
+
+
+@dataclass
 class Notice:
-    source: str                     # 청약홈
+    source: str                     # 청약홈 / LH / SH / 청년안심
     uid: str                        # 수집처 내 유일 id
     title: str
-    category: str = ""              # 접수 유형 모음 (특별공급, 1순위 …)
+    source_id: str = "applyhome"    # 수집원 식별자 (registry 키)
+    category: str = ""              # 접수 유형 모음
     region: str = ""                # 시도
     address: str = ""
     house_secd: str = "01"
     house_manage_no: str = ""
     pblanc_no: str = ""
 
-    posted: Optional[date] = None   # 모집공고일
-    begin: Optional[date] = None    # 접수 시작
-    end: Optional[date] = None      # 접수 마감
-    announce: Optional[date] = None # 당첨자 발표
+    posted: Optional[date] = None    # 모집공고일
+    begin: Optional[date] = None     # 접수 시작
+    end: Optional[date] = None       # 접수 마감
+    announce: Optional[date] = None  # 당첨자 발표
 
     households: str = ""
     url: str = ""
-    doc_url: str = ""               # 모집공고문 PDF
+    doc_url: str = ""                # 모집공고문 PDF
     phone: str = ""
-    price: str = ""
+    price: str = ""                  # 사람이 읽는 공급금액 문자열
+    price_min: Optional[int] = None  # 만원
+    price_max: Optional[int] = None  # 만원
     move_in: str = ""
     status: str = ""
 
     events: list[Event] = field(default_factory=list)
+    areas: list[Area] = field(default_factory=list)
     detail_loaded: bool = False
+    dup_of: str = ""                 # 중복 제거로 흡수된 원본 key
+    correction_of: str = ""          # 정정 공고라면 원본 key
     extra: dict = field(default_factory=dict)
 
     @property
@@ -93,7 +113,7 @@ class Notice:
         return f"{self.title} {self.category}"
 
     def is_closed(self, today: date) -> bool:
-        """원본 cheongyak-auto 의 보수적 마감 추정을 그대로 가져왔다."""
+        """원본 cheongyak-auto 의 보수적 마감 추정을 가져왔다."""
         if self.end is not None:
             return self.end < today
         if self.status and any(k in self.status for k in ("마감", "완료", "종료")):
@@ -106,16 +126,34 @@ class Notice:
             return True
         return False
 
+    # ---- D-day: 시작과 마감을 따로 센다 ----
+    def days_to_begin(self, today: date) -> Optional[int]:
+        return None if self.begin is None else (self.begin - today).days
+
     def days_left(self, today: date) -> Optional[int]:
-        """접수 마감까지 남은 일수. 마감일을 모르면 None."""
-        if self.end is None:
-            return None
-        return (self.end - today).days
+        """접수 마감까지 남은 일수."""
+        return None if self.end is None else (self.end - today).days
+
+    def days_to_announce(self, today: date) -> Optional[int]:
+        return None if self.announce is None else (self.announce - today).days
+
+    def phase(self, today: date) -> str:
+        """예정 / 접수중 / 마감 / 발표대기 / 미정."""
+        if self.begin is None and self.end is None:
+            return "미정"
+        if self.begin is not None and today < self.begin:
+            return "예정"
+        if self.end is not None and today > self.end:
+            if self.announce is not None and today <= self.announce:
+                return "발표대기"
+            return "마감"
+        return "접수중"
 
     def to_dict(self):
         d = asdict(self)
         for k in ("posted", "begin", "end", "announce"):
             d[k] = iso(d[k])
         d["events"] = [e.to_dict() for e in self.events]
+        d["areas"] = [a.to_dict() for a in self.areas]
         d["key"] = self.key
         return d

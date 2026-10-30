@@ -2,189 +2,399 @@
 <html lang="ko">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
 <title>HOME RADAR</title>
 <style>
+/* ===== 모바일 우선. 640px / 1024px 에서 넓힌다 ===== */
+:root{
+  --bg:#f4f6f8; --card:#fff; --line:#e4e7ec; --ink:#161a1f; --dim:#667085;
+  --rec:#0b8a4b; --rec-bg:#e8f6ee;
+  --chk:#b26a00; --chk-bg:#fdf3e3;
+  --exc:#8a9099; --exc-bg:#f0f2f4;
+  --accent:#2457d6; --warn:#c62828; --ok:#0b8a4b;
+  --r:12px; --pad:14px;
+  --safe: env(safe-area-inset-bottom, 0px);
+}
+@media (prefers-color-scheme: dark){
   :root{
-    --bg:#f6f7f9; --card:#fff; --line:#e3e6ea; --ink:#1b1f24; --dim:#6b7280;
-    --rec:#0f9d58; --chk:#d79000; --exc:#9aa0a6; --accent:#2563eb; --warn:#dc2626;
-    --radius:10px;
+    --bg:#15181c; --card:#1d2126; --line:#2c3238; --ink:#e8eaed; --dim:#98a2b3;
+    --rec-bg:#12301f; --chk-bg:#30250f; --exc-bg:#23272c;
+    --rec:#3ec17c; --chk:#e0a132; --exc:#8a9099; --accent:#6b93ff; --warn:#ef6b6b;
   }
-  *{box-sizing:border-box}
-  body{margin:0;background:var(--bg);color:var(--ink);
-    font:15px/1.55 -apple-system,"Segoe UI",system-ui,"Malgun Gothic",sans-serif}
-  header{background:var(--card);border-bottom:1px solid var(--line);padding:14px 20px;
-    display:flex;align-items:center;gap:14px;flex-wrap:wrap;position:sticky;top:0;z-index:20}
-  h1{margin:0;font-size:19px;letter-spacing:-.3px}
-  h1 small{font-weight:400;color:var(--dim);font-size:12px;margin-left:6px}
-  .grow{flex:1}
-  button{font:inherit;border:1px solid var(--line);background:var(--card);color:var(--ink);
-    padding:7px 13px;border-radius:8px;cursor:pointer}
-  button:hover{background:#eef1f5}
-  button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
-  button.primary:hover{filter:brightness(1.08)}
-  button:disabled{opacity:.5;cursor:not-allowed}
-  main{padding:20px;max-width:1180px;margin:0 auto}
-  .meta{color:var(--dim);font-size:12.5px}
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--ink);
+  font:15px/1.5 -apple-system,"Segoe UI",system-ui,"Malgun Gothic",sans-serif;
+  -webkit-text-size-adjust:100%}
+button,select,input{font:inherit;color:inherit}
 
-  .alerts{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;
-    margin-bottom:20px}
-  .alert{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
-    padding:13px 15px}
-  .alert.hot{border-color:#f3c0c0;background:#fff7f7}
-  .alert h3{margin:0 0 8px;font-size:13px;color:var(--dim);font-weight:600;
-    display:flex;align-items:center;gap:7px}
-  .alert .n{font-size:21px;font-weight:700;color:var(--ink)}
-  .alert.hot .n{color:var(--warn)}
-  .alert ul{margin:8px 0 0;padding-left:0;list-style:none;font-size:13px}
-  .alert li{padding:3px 0;border-top:1px dashed var(--line)}
-  .alert li:first-child{border-top:0}
+/* ---- 헤더 ---- */
+header{background:var(--card);border-bottom:1px solid var(--line);
+  padding:10px var(--pad);position:sticky;top:0;z-index:30}
+.hrow{display:flex;align-items:center;gap:10px}
+h1{margin:0;font-size:16px;letter-spacing:-.3px;white-space:nowrap}
+h1 em{font-style:normal;color:var(--accent)}
+.grow{flex:1;min-width:0}
+.btn{border:1px solid var(--line);background:var(--card);padding:7px 11px;
+  border-radius:9px;cursor:pointer;white-space:nowrap;font-size:13.5px}
+.btn:hover{background:var(--bg)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.stamp{font-size:11.5px;color:var(--dim);white-space:nowrap;overflow:hidden;
+  text-overflow:ellipsis}
 
-  .bar{display:flex;gap:9px;align-items:center;flex-wrap:wrap;margin-bottom:14px}
-  select,input[type=text],input[type=number]{font:inherit;padding:6px 9px;
-    border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--ink)}
-  label.chk{display:inline-flex;align-items:center;gap:6px;font-size:13.5px;color:var(--dim)}
+main{padding:var(--pad);padding-bottom:calc(40px + var(--safe));
+  max-width:1180px;margin:0 auto}
+section{margin-bottom:16px}
+.sec-h{display:flex;align-items:baseline;gap:8px;margin:0 0 8px;font-size:13px;
+  color:var(--dim);font-weight:600}
 
-  .bucket{margin-bottom:26px}
-  .bucket>h2{margin:0 0 11px;font-size:16px;display:flex;align-items:center;gap:9px}
-  .pill{font-size:11.5px;font-weight:700;padding:3px 9px;border-radius:999px;color:#fff}
-  .pill.rec{background:var(--rec)} .pill.chk{background:var(--chk)}
-  .pill.exc{background:var(--exc)}
-  .bucket>h2 .meta{font-weight:400}
+/* ---- 통계 카드 ---- */
+.stats{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}
+@media(min-width:640px){.stats{grid-template-columns:repeat(4,1fr)}}
+.stat{background:var(--card);border:1px solid var(--line);border-radius:var(--r);
+  padding:11px 12px;cursor:pointer;text-align:left;position:relative;overflow:hidden}
+.stat[aria-pressed=true]{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset}
+.stat .lab{font-size:11.5px;color:var(--dim);display:block}
+.stat .num{font-size:24px;font-weight:700;line-height:1.2;display:block}
+.stat .sub{font-size:11px;color:var(--dim)}
+.stat .bar{position:absolute;left:0;bottom:0;height:3px;background:var(--accent);
+  transition:width .3s}
+.stat.rec .num{color:var(--rec)} .stat.rec .bar{background:var(--rec)}
+.stat.chk .num{color:var(--chk)} .stat.chk .bar{background:var(--chk)}
+.stat.exc .num{color:var(--exc)} .stat.exc .bar{background:var(--exc)}
 
-  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);
-    padding:13px 15px;margin-bottom:9px}
-  .card.urgent{border-left:3px solid var(--warn)}
-  .card .top{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap}
-  .card .title{font-weight:600;font-size:15.5px}
-  .tag{font-size:11.5px;color:var(--dim);border:1px solid var(--line);
-    border-radius:6px;padding:1px 7px;white-space:nowrap}
-  .tag.d{border-color:#f3c0c0;color:var(--warn);font-weight:600}
-  .tag.k{background:#eef2ff;border-color:#dde3ff;color:#3b4fd8}
-  .card .line{margin-top:7px;font-size:13.5px;color:#39404a}
-  .card .line b{font-weight:600;color:var(--ink)}
-  .why{margin-top:8px;font-size:13px;display:flex;flex-direction:column;gap:3px}
-  .why div::before{content:"· ";color:var(--dim)}
-  .why .blk{color:var(--warn)}
-  .why .tip{color:#8a6d00}
-  .card a{color:var(--accent);text-decoration:none;font-size:13px}
-  .card a:hover{text-decoration:underline}
-  .empty{color:var(--dim);font-size:13.5px;padding:10px 2px}
+/* ---- 수집원 상태 ---- */
+.srcs{display:flex;gap:7px;overflow-x:auto;padding-bottom:3px;-webkit-overflow-scrolling:touch}
+.src{flex:0 0 auto;background:var(--card);border:1px solid var(--line);
+  border-radius:999px;padding:5px 11px;font-size:12px;display:flex;align-items:center;gap:6px}
+.dot{width:7px;height:7px;border-radius:50%;flex:0 0 auto}
+.dot.ok{background:var(--ok)} .dot.fail{background:var(--warn)}
+.dot.skip{background:var(--exc)}
+.src .t{color:var(--dim);font-size:11px}
 
-  dialog{border:1px solid var(--line);border-radius:14px;padding:0;max-width:720px;
-    width:calc(100% - 32px);box-shadow:0 18px 50px rgba(0,0,0,.18)}
-  dialog::backdrop{background:rgba(15,20,28,.45)}
-  .dlg-h{padding:16px 20px;border-bottom:1px solid var(--line);display:flex;
-    align-items:center;gap:10px}
-  .dlg-h h2{margin:0;font-size:17px}
-  .dlg-b{padding:18px 20px;max-height:66vh;overflow:auto}
-  .dlg-f{padding:13px 20px;border-top:1px solid var(--line);display:flex;
-    gap:9px;justify-content:flex-end;align-items:center}
-  fieldset{border:1px solid var(--line);border-radius:10px;margin:0 0 15px;padding:13px 15px}
-  legend{font-size:12.5px;color:var(--dim);font-weight:600;padding:0 5px}
-  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:11px}
-  .f{display:flex;flex-direction:column;gap:4px}
-  .f span{font-size:12.5px;color:var(--dim)}
-  .hint{font-size:12px;color:var(--dim);margin-top:7px}
-  .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:26px;background:#1b1f24;
-    color:#fff;padding:10px 17px;border-radius:9px;font-size:13.5px;z-index:60;display:none}
+/* ---- 알림 ---- */
+.alerts{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}
+@media(min-width:640px){.alerts{grid-template-columns:repeat(5,1fr)}}
+.alert{background:var(--card);border:1px solid var(--line);border-radius:var(--r);
+  padding:10px 11px;cursor:pointer;text-align:left}
+.alert[aria-pressed=true]{border-color:var(--accent)}
+.alert.hot{border-color:#f0c2c2;background:var(--chk-bg)}
+.alert .lab{font-size:11.5px;color:var(--dim);display:block}
+.alert .num{font-size:19px;font-weight:700}
+.alert.hot .num{color:var(--warn)}
+
+/* ---- 보기 전환 · 필터 ---- */
+.tabs{display:flex;gap:6px;background:var(--card);border:1px solid var(--line);
+  border-radius:10px;padding:4px}
+.tabs button{flex:1;border:0;background:transparent;padding:7px 4px;border-radius:7px;
+  cursor:pointer;font-size:13.5px;color:var(--dim)}
+.tabs button[aria-selected=true]{background:var(--accent);color:#fff;font-weight:600}
+.filters{display:flex;flex-wrap:wrap;gap:7px;margin-top:9px}
+.filters select,.filters input[type=search]{background:var(--card);
+  border:1px solid var(--line);border-radius:9px;padding:7px 9px;font-size:13.5px;
+  max-width:100%}
+.filters input[type=search]{flex:1;min-width:120px}
+.chk{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--dim)}
+.chips{display:flex;gap:6px;overflow-x:auto;margin-top:8px;padding-bottom:3px}
+.chip{flex:0 0 auto;border:1px solid var(--line);background:var(--card);
+  border-radius:999px;padding:5px 11px;font-size:12.5px;cursor:pointer;color:var(--dim)}
+.chip[aria-pressed=true]{background:var(--accent);border-color:var(--accent);color:#fff}
+
+/* ---- 공고 카드 ---- */
+.list{display:flex;flex-direction:column;gap:7px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);
+  padding:11px 12px}
+.card.lv-추천{border-left:3px solid var(--rec)}
+.card.lv-확인{border-left:3px solid var(--chk)}
+.card.lv-제외{border-left:3px solid var(--exc);opacity:.82}
+.ct{display:flex;align-items:flex-start;gap:8px}
+.ct .title{font-weight:600;font-size:14.5px;line-height:1.35;flex:1;min-width:0;
+  word-break:keep-all;overflow-wrap:anywhere}
+.star{border:0;background:transparent;cursor:pointer;font-size:17px;line-height:1;
+  padding:0 2px;color:var(--line);flex:0 0 auto}
+.star[aria-pressed=true]{color:#f2b013}
+.tags{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px}
+.tag{font-size:11px;border:1px solid var(--line);border-radius:6px;padding:1px 6px;
+  color:var(--dim);white-space:nowrap}
+.tag.k{background:var(--exc-bg);border-color:transparent;color:var(--ink);font-weight:600}
+.tag.g{background:var(--rec-bg);border-color:transparent;color:var(--rec)}
+.tag.src{border-style:dashed}
+.dd{display:flex;flex-wrap:wrap;gap:4px;margin-top:7px}
+.pill{font-size:11.5px;border-radius:7px;padding:2px 7px;white-space:nowrap;
+  background:var(--exc-bg);color:var(--ink)}
+.pill b{font-weight:700}
+.pill.open{background:var(--rec-bg);color:var(--rec)}
+.pill.soon{background:var(--chk-bg);color:var(--chk)}
+.pill.urgent{background:#fdeaea;color:var(--warn);font-weight:700}
+@media (prefers-color-scheme: dark){.pill.urgent{background:#3a1d1d}}
+.facts{margin-top:7px;font-size:12.5px;color:var(--dim);display:flex;
+  flex-wrap:wrap;gap:3px 10px}
+.facts b{color:var(--ink);font-weight:600}
+.verdict{margin-top:8px;font-size:12.5px}
+.vsum{display:flex;gap:5px;flex-wrap:wrap;align-items:center}
+.vsum .n{border-radius:6px;padding:1px 7px;font-size:11.5px;font-weight:600}
+.n.met{background:var(--rec-bg);color:var(--rec)}
+.n.unk{background:var(--chk-bg);color:var(--chk)}
+.n.bad{background:#fdeaea;color:var(--warn)}
+@media (prefers-color-scheme: dark){.n.bad{background:#3a1d1d}}
+.why{list-style:none;margin:7px 0 0;padding:0;display:flex;flex-direction:column;gap:4px}
+.why li{display:flex;gap:6px;align-items:flex-start;line-height:1.45}
+.why .ic{flex:0 0 auto;width:14px;text-align:center;font-weight:700}
+.why .ic.met{color:var(--rec)} .why .ic.unk{color:var(--chk)}
+.why .ic.bad{color:var(--warn)}
+.why .nm{font-weight:600;margin-right:4px}
+.why .todo{color:var(--accent)}
+.src-note{font-size:11px;color:var(--dim)}
+.src-note .sample{color:var(--chk);font-weight:600}
+.links{margin-top:8px;display:flex;gap:10px;flex-wrap:wrap}
+.links a{color:var(--accent);text-decoration:none;font-size:12.5px}
+.links a:hover{text-decoration:underline}
+details.more>summary{cursor:pointer;color:var(--accent);font-size:12.5px;
+  margin-top:6px;list-style:none}
+details.more>summary::-webkit-details-marker{display:none}
+.rev{margin-top:7px;font-size:11.5px;color:var(--chk);background:var(--chk-bg);
+  border-radius:8px;padding:6px 8px}
+.empty{color:var(--dim);font-size:13.5px;padding:16px 2px;text-align:center}
+
+/* ---- 캘린더 ---- */
+.cal-h{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.cal{background:var(--card);border:1px solid var(--line);border-radius:var(--r);
+  padding:8px;overflow-x:auto}
+.cal table{width:100%;border-collapse:collapse;min-width:300px}
+.cal th{font-size:11px;color:var(--dim);font-weight:600;padding:4px 0}
+.cal td{vertical-align:top;height:58px;width:14.28%;border:1px solid var(--line);
+  padding:3px;font-size:11px}
+@media(min-width:640px){.cal td{height:82px;font-size:12px}}
+.cal td.off{background:var(--bg)}
+.cal td.today{outline:2px solid var(--accent);outline-offset:-2px}
+.cal .dnum{font-weight:600;color:var(--dim);font-size:11px}
+.cal .ev{margin-top:2px;border-radius:4px;padding:1px 3px;white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis;font-size:10.5px;cursor:pointer}
+.ev.추천{background:var(--rec-bg);color:var(--rec)}
+.ev.확인{background:var(--chk-bg);color:var(--chk)}
+.ev.제외{background:var(--exc-bg);color:var(--dim)}
+.cal .mono{color:var(--dim);font-size:10px}
+
+/* ---- 타임라인 ---- */
+.tl{display:flex;flex-direction:column;gap:6px}
+.tlrow{background:var(--card);border:1px solid var(--line);border-radius:10px;
+  padding:8px 10px;display:flex;gap:10px;align-items:flex-start}
+.tlrow.wk{background:var(--bg)}
+.tld{flex:0 0 68px;font-size:12px}
+.tld .d{font-weight:700} .tld .w{color:var(--dim);font-size:11px}
+.tld.sat .d{color:#2457d6} .tld.sun .d{color:var(--warn)}
+.tli{flex:1;display:flex;flex-direction:column;gap:3px;min-width:0}
+.tli .it{font-size:12px;display:flex;gap:6px}
+.tli .ev{font-size:10.5px;border-radius:5px;padding:0 5px;flex:0 0 auto}
+.tlnone{color:var(--dim);font-size:11.5px}
+
+/* ---- 내 조건 다이얼로그 ---- */
+dialog{border:1px solid var(--line);border-radius:14px;padding:0;background:var(--card);
+  color:var(--ink);width:min(760px,calc(100% - 20px));max-height:92vh}
+dialog::backdrop{background:rgba(10,14,20,.5)}
+.dh{padding:13px 16px;border-bottom:1px solid var(--line);display:flex;
+  align-items:center;gap:8px;position:sticky;top:0;background:var(--card);z-index:2}
+.dh h2{margin:0;font-size:16px}
+.db{padding:14px 16px;overflow:auto;max-height:70vh}
+.df{padding:11px 16px;border-top:1px solid var(--line);display:flex;gap:8px;
+  justify-content:flex-end;align-items:center;position:sticky;bottom:0;background:var(--card)}
+fieldset{border:1px solid var(--line);border-radius:10px;margin:0 0 13px;padding:11px 13px}
+legend{font-size:12px;color:var(--dim);font-weight:700;padding:0 4px}
+.grid{display:grid;grid-template-columns:1fr;gap:10px}
+@media(min-width:560px){.grid{grid-template-columns:repeat(2,1fr)}}
+@media(min-width:860px){.grid{grid-template-columns:repeat(3,1fr)}}
+.f{display:flex;flex-direction:column;gap:3px}
+.f span{font-size:12px;color:var(--dim)}
+.f input,.f select{background:var(--bg);border:1px solid var(--line);
+  border-radius:8px;padding:8px 9px;width:100%}
+.cgrid{display:grid;grid-template-columns:repeat(2,1fr);gap:7px}
+@media(min-width:560px){.cgrid{grid-template-columns:repeat(3,1fr)}}
+.hint{font-size:11.5px;color:var(--dim);margin-top:8px;line-height:1.5}
+.hint b{color:var(--ink)}
+.calc{background:var(--bg);border-radius:9px;padding:9px 11px;font-size:12.5px;
+  margin-top:9px;display:flex;flex-direction:column;gap:3px}
+.calc .r{display:flex;justify-content:space-between;gap:10px}
+.calc .r b{font-weight:700}
+.toast{position:fixed;left:50%;transform:translateX(-50%);
+  bottom:calc(20px + var(--safe));background:#101418;color:#fff;padding:10px 16px;
+  border-radius:10px;font-size:13.5px;z-index:60;display:none;max-width:92vw;
+  text-align:center}
 </style>
 </head>
 <body>
 
 <header>
-  <h1>HOME RADAR <small>공식 청약 공고 · 내 조건 필터</small></h1>
-  <div class="grow"></div>
-  <span id="stamp" class="meta"></span>
-  <button id="btn-profile">내 조건</button>
-  <button id="btn-refresh" class="primary">새로고침</button>
+  <div class="hrow">
+    <h1>HOME <em>RADAR</em></h1>
+    <div class="grow"><div class="stamp" id="stamp"></div></div>
+    <button class="btn" id="btn-profile">내 조건</button>
+    <button class="btn primary" id="btn-refresh">새로고침</button>
+  </div>
 </header>
 
 <main>
-  <section class="alerts" id="alerts"></section>
+  <section>
+    <div class="stats" id="stats"></div>
+  </section>
 
-  <div class="bar">
-    <select id="f-region"><option value="">지역 전체</option></select>
-    <select id="f-kind"><option value="">유형 전체</option></select>
-    <input type="text" id="f-q" placeholder="단지명 검색" style="width:170px">
-    <label class="chk"><input type="checkbox" id="f-closed"> 마감된 공고도 보기</label>
-    <span class="grow"></span>
-    <span id="stats" class="meta"></span>
-  </div>
+  <section>
+    <div class="sec-h">수집원 <span id="src-sum" class="stamp"></span></div>
+    <div class="srcs" id="srcs"></div>
+  </section>
 
-  <div id="buckets"></div>
+  <section>
+    <div class="sec-h">알림</div>
+    <div class="alerts" id="alerts"></div>
+  </section>
+
+  <section>
+    <div class="tabs" id="views" role="tablist">
+      <button role="tab" data-view="list" aria-selected="true">목록</button>
+      <button role="tab" data-view="cal" aria-selected="false">캘린더</button>
+      <button role="tab" data-view="tl" aria-selected="false">타임라인</button>
+    </div>
+
+    <div id="pane-filters">
+      <div class="filters">
+        <select id="f-region"></select>
+        <select id="f-kind"></select>
+        <select id="f-phase"></select>
+        <input type="search" id="f-q" placeholder="단지명 검색">
+        <label class="chk"><input type="checkbox" id="f-closed"> 마감 포함</label>
+      </div>
+      <div class="chips" id="f-tags"></div>
+    </div>
+  </section>
+
+  <section id="view-list">
+    <div class="list" id="list"></div>
+  </section>
+
+  <section id="view-cal" hidden>
+    <div class="cal-h">
+      <button class="btn" id="cal-prev">‹</button>
+      <div class="grow" style="text-align:center;font-weight:700" id="cal-label"></div>
+      <button class="btn" id="cal-next">›</button>
+    </div>
+    <div class="cal" id="cal"></div>
+  </section>
+
+  <section id="view-tl" hidden>
+    <div class="sec-h">앞으로 2주 일정</div>
+    <div class="tl" id="tl"></div>
+  </section>
 </main>
 
 <dialog id="dlg">
-  <form method="dialog" id="pform">
-    <div class="dlg-h"><h2>내 조건</h2><div class="grow"></div>
-      <span class="meta" id="inc-hint"></span></div>
-    <div class="dlg-b">
+  <form id="pform" method="dialog">
+    <div class="dh"><h2>내 조건</h2><div class="grow"></div>
+      <button class="btn" value="cancel" type="submit">닫기</button></div>
+    <div class="db">
+      <div class="hint" style="margin-top:0">
+        <b>입력한 값은 이 컴퓨터의 <code>profile.json</code> 에만 저장된다.</b>
+        외부로 보내지 않고 Git 에도 올라가지 않는다(.gitignore).
+        정보가 비어 있으면 그 조건은 <b>'미확인'</b>이 되고, 미확인이 하나라도 있으면
+        <b>절대 '추천'으로 확정하지 않는다.</b>
+      </div>
 
-      <fieldset><legend>기본</legend>
+      <fieldset><legend>기본 · 세대</legend>
         <div class="grid">
-          <label class="f"><span>생년월일 (YYYY-MM-DD 또는 연도)</span>
-            <input type="text" name="birth" placeholder="1995-03-02"></label>
+          <label class="f"><span>생년월일</span>
+            <input type="text" name="birth" placeholder="1994-07-15"></label>
           <label class="f"><span>혼인 상태</span><select name="marital"></select></label>
+          <label class="f"><span>혼인신고일 (신혼 7년 판단)</span>
+            <input type="text" name="marriage_date" placeholder="2021-05"></label>
           <label class="f"><span>가구원 수 (소득 기준 계산)</span>
             <input type="number" name="household_size" min="1" max="10"></label>
           <label class="f"><span>미성년 자녀 수</span>
             <input type="number" name="children" min="0" max="10"></label>
-          <label class="f"><span>거주 시도</span><select name="residence"></select></label>
           <label class="f"><span>세대 구성</span><select name="household"></select></label>
         </div>
-        <div class="grid" style="margin-top:11px">
-          <label class="chk"><input type="checkbox" name="newborn"> 2세 미만 자녀·임신 중</label>
-          <label class="chk"><input type="checkbox" name="single_parent"> 한부모 가정</label>
+        <div class="cgrid" style="margin-top:10px">
+          <label class="chk"><input type="checkbox" name="is_householder"> 본인이 세대주</label>
+          <label class="chk"><input type="checkbox" name="household_homeless"> 세대원 전원 무주택</label>
+          <label class="chk"><input type="checkbox" name="newborn"> 2세 미만·임신 중</label>
+          <label class="chk"><input type="checkbox" name="single_parent"> 한부모</label>
           <label class="chk"><input type="checkbox" name="student"> 대학(원)생</label>
           <label class="chk"><input type="checkbox" name="disabled"> 장애인 등록</label>
           <label class="chk"><input type="checkbox" name="low_income"> 수급·차상위</label>
-          <label class="chk"><input type="checkbox" name="artist_or_startup"> 예술인·청년창업</label>
+          <label class="chk"><input type="checkbox" name="artist_or_startup"> 예술인·창업</label>
         </div>
       </fieldset>
 
-      <fieldset><legend>주택 보유 · 청약통장</legend>
+      <fieldset><legend>주택 보유 · 거주</legend>
         <div class="grid">
+          <label class="f"><span>거주 시도</span><select name="residence"></select></label>
+          <label class="f"><span>현 거주지 전입일</span>
+            <input type="text" name="residence_since" placeholder="2019-03"></label>
+          <label class="f"><span>무주택 기산일</span>
+            <input type="text" name="homeless_since" placeholder="2018-01"></label>
+        </div>
+        <div class="cgrid" style="margin-top:10px">
           <label class="chk"><input type="checkbox" name="homeless"> 본인 무주택</label>
-          <label class="chk"><input type="checkbox" name="household_homeless"> 세대원 전원 무주택</label>
           <label class="chk"><input type="checkbox" name="ever_owned"> 과거 주택 보유 이력</label>
-          <label class="chk"><input type="checkbox" name="has_account"> 청약통장 보유</label>
-          <label class="f"><span>통장 가입 기간 (년)</span>
-            <input type="number" name="account_years" min="0" max="40"></label>
-          <label class="f"><span>납입 횟수</span>
-            <input type="number" name="account_payments" min="0" max="600"></label>
-          <label class="f"><span>통장 쓰는 공고 처리</span>
-            <select name="account_mode"></select></label>
+          <label class="chk"><input type="checkbox" name="ever_won"> 과거 청약 당첨 이력</label>
         </div>
       </fieldset>
 
       <fieldset><legend>소득 · 자산</legend>
         <div class="grid">
-          <label class="f"><span>세전 월소득 (만원)</span>
-            <input type="number" name="monthly_income" min="0" placeholder="예: 350"></label>
+          <label class="f"><span>근로소득 (세전 월, 만원)</span>
+            <input type="number" name="income_work" min="0" placeholder="330"></label>
+          <label class="f"><span>사업·기타소득 (월 환산, 만원)</span>
+            <input type="number" name="income_business" min="0" placeholder="0"></label>
           <label class="f"><span>총자산 (만원)</span>
-            <input type="number" name="assets" min="0"></label>
+            <input type="number" name="assets" min="0" placeholder="9000"></label>
+          <label class="f"><span>총부채 (만원)</span>
+            <input type="number" name="debts" min="0"></label>
           <label class="f"><span>자동차가액 (만원)</span>
             <input type="number" name="car" min="0"></label>
         </div>
-        <div class="hint">소득·자산은 <b>제외 근거로 쓰지 않는다.</b> 공고별 실제 기준이 항상
-          우선하므로, 상한을 넘으면 추천을 '확인'으로 낮추고 사유만 적는다.</div>
-      </fieldset>
-
-      <fieldset><legend>알림 받을 지역 · 유형</legend>
-        <div id="regions" class="grid"></div>
-        <div id="wants" class="grid" style="margin-top:11px"></div>
-        <div class="grid" style="margin-top:11px">
-          <label class="f"><span>마감 며칠 전부터 알릴까</span>
-            <input type="number" name="remind_days" min="0" max="30"></label>
+        <div class="calc" id="calc"></div>
+        <div class="hint">
+          청약 소득 심사는 근로소득과 사업소득의 <b>인정 방식이 다르고</b>
+          가구원 합산 범위도 공고별로 달라서, HOME RADAR 는 두 값을 합쳐
+          '소득 인정액'이라고 부르지 않는다. 지금 들고 있는 도시근로자 소득표는
+          <b class="src-note"><span class="sample">샘플 기준</span></b>이라
+          <b>적격·부적격을 확정하지 않고 참고 신호로만</b> 쓴다.
         </div>
       </fieldset>
 
+      <fieldset><legend>청약통장</legend>
+        <div class="grid">
+          <label class="f"><span>가입일</span>
+            <input type="text" name="account_opened" placeholder="2019-04-01"></label>
+          <label class="f"><span>납입 횟수</span>
+            <input type="number" name="account_payments" min="0" max="600"></label>
+          <label class="f"><span>납입인정금액 (만원)</span>
+            <input type="number" name="account_recognized" min="0"></label>
+          <label class="f"><span>통장 쓰는 공고 처리</span>
+            <select name="account_mode"></select></label>
+        </div>
+        <div class="cgrid" style="margin-top:10px">
+          <label class="chk"><input type="checkbox" name="has_account"> 청약통장 보유</label>
+        </div>
+      </fieldset>
+
+      <fieldset><legend>희망 조건</legend>
+        <div class="grid">
+          <label class="f"><span>희망 최대 분양가 (만원)</span>
+            <input type="number" name="max_price" min="0" placeholder="60000"></label>
+          <label class="f"><span>마감 며칠 전부터 알릴까</span>
+            <input type="number" name="remind_days" min="0" max="30"></label>
+        </div>
+        <div class="sec-h" style="margin:12px 0 6px">관심 지역</div>
+        <div class="cgrid" id="p-regions"></div>
+        <div class="sec-h" style="margin:12px 0 6px">관심 유형</div>
+        <div class="cgrid" id="p-wants"></div>
+      </fieldset>
     </div>
-    <div class="dlg-f">
-      <span class="meta grow" id="pmsg"></span>
-      <button value="cancel">닫기</button>
-      <button id="btn-save" class="primary" value="save">저장</button>
+    <div class="df">
+      <span class="stamp grow" id="pmsg"></span>
+      <button class="btn primary" id="btn-save" value="save" type="submit">저장</button>
     </div>
   </form>
 </dialog>
@@ -192,149 +402,372 @@
 <div class="toast" id="toast"></div>
 
 <script>
+'use strict';
 const $ = s => document.querySelector(s);
-let META = null, VIEW = null, POLL = null;
+const $$ = s => [...document.querySelectorAll(s)];
+let VIEW = null, META = null, POLL = null;
+let TAB = 'all';          // all | 추천 | 확인 | 제외 | bookmark
+let ALERT = null;         // new | closing | opening | today | revised
+let PANE = 'list';        // list | cal | tl
+let CAL_OFF = 0;          // 캘린더 월 오프셋
+const TAGS = new Set();
 
-function toast(msg, ms = 2600) {
+const esc = s => String(s ?? '').replace(/[&<>"']/g,
+  c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+function toast(msg, ms = 2800){
   const t = $('#toast'); t.textContent = msg; t.style.display = 'block';
   clearTimeout(t._h); t._h = setTimeout(() => t.style.display = 'none', ms);
 }
 
-/* ---------------- 조회 ---------------- */
-async function loadView() {
-  const closed = $('#f-closed').checked;
-  const r = await fetch(`/api/view?include_closed=${closed}`);
+/* 만원 → '3억 2,000만원' */
+function won(m){
+  if (m === null || m === undefined || m === '') return '';
+  const v = Math.round(Number(m)); if (!v) return '0원';
+  const eok = Math.floor(Math.abs(v)/10000), rest = Math.abs(v)%10000;
+  const sg = v < 0 ? '-' : '';
+  if (eok && rest) return `${sg}${eok}억 ${rest.toLocaleString()}만원`;
+  if (eok) return `${sg}${eok}억원`;
+  return `${sg}${rest.toLocaleString()}만원`;
+}
+
+/* ================= 조회 ================= */
+async function loadView(){
+  const r = await fetch(`/api/view?include_closed=${$('#f-closed').checked}`);
   VIEW = await r.json();
   render();
 }
 
-function render() {
+function render(){
   if (!VIEW) return;
-  if (!VIEW.ready) {
-    $('#alerts').innerHTML = '';
-    $('#buckets').innerHTML = `<div class="empty">${VIEW.message}</div>`;
-    $('#stats').textContent = ''; $('#stamp').textContent = '';
+  renderStats(); renderSources(); renderAlerts();
+  if (!VIEW.ready){
+    $('#list').innerHTML = `<div class="empty">${esc(VIEW.message)}</div>`;
     return;
   }
-  const s = VIEW.stats;
-  $('#stamp').textContent = VIEW.fetched_at ? `수집 ${VIEW.fetched_at.replace('T', ' ')}` : '';
-  $('#stats').textContent =
-    `수집 ${s.collected}건 · 표시 ${s.shown}건 · 추천 ${s.추천} / 확인 ${s.확인} / 제외 ${s.제외}`
-    + (s.무시 ? ` · 후속안내 ${s.무시}건 숨김` : '');
-
-  renderAlerts();
-  fillFilters();
-  renderBuckets();
+  $('#stamp').textContent =
+    (VIEW.fetched_at ? `수집 ${VIEW.fetched_at.replace('T',' ').slice(5,16)}` : '')
+    + ` · 기준 ${VIEW.today}`;
+  fillFilters(); renderTags(); renderPane();
 }
 
-function renderAlerts() {
-  const a = VIEW.alerts, d = VIEW.stats.remind_days;
-  const box = (cls, title, items, note) => `
-    <div class="alert ${cls}">
-      <h3>${title}</h3>
-      <div class="n">${items.length}건</div>
-      ${items.length ? `<ul>${items.slice(0, 5).map(r =>
-        `<li>${r.days_left !== null ? `D-${r.days_left} · ` : ''}${esc(r.title)}</li>`).join('')}
-        ${items.length > 5 ? `<li class="meta">그 외 ${items.length - 5}건</li>` : ''}</ul>`
-        : `<div class="meta" style="margin-top:6px">${note}</div>`}
-    </div>`;
-  $('#alerts').innerHTML =
-    box('', '오늘 새로 올라온 공고', a.new, '오늘 처음 관측된 공고가 없습니다')
-    + box(a.closing.length ? 'hot' : '', `접수 마감 ${d}일 이내`, a.closing, '임박한 마감이 없습니다')
-    + box('', '오늘이 접수일', a.today, '오늘 접수하는 공고가 없습니다');
+/* ---- 통계 카드 (탭 겸용) ---- */
+function renderStats(){
+  const s = VIEW.stats || {};
+  const tot = (s['추천']||0) + (s['확인']||0) + (s['제외']||0);
+  const pct = n => tot ? Math.round((n/tot)*100) : 0;
+  const card = (id, cls, lab, num, sub) => `
+    <button class="stat ${cls}" data-tab="${id}" aria-pressed="${TAB===id}">
+      <span class="lab">${lab}</span>
+      <span class="num">${num ?? 0}</span>
+      <span class="sub">${sub}</span>
+      <span class="bar" style="width:${pct(num)}%"></span>
+    </button>`;
+  $('#stats').innerHTML =
+      card('추천','rec','신청 가능성 높음', s['추천'], `전체의 ${pct(s['추천'])}%`)
+    + card('확인','chk','확인 필요', s['확인'], `전체의 ${pct(s['확인'])}%`)
+    + card('제외','exc','제외', s['제외'], `전체의 ${pct(s['제외'])}%`)
+    + card('bookmark','', '관심 공고', s.bookmarked,
+           `표시 ${s.shown}건 / 수집 ${s.collected}건`);
 }
 
-function fillFilters() {
-  const all = [].concat(VIEW.buckets.추천, VIEW.buckets.확인, VIEW.buckets.제외);
-  const fill = (sel, values, label) => {
-    const cur = sel.value;
-    sel.innerHTML = `<option value="">${label}</option>` +
-      [...new Set(values)].filter(Boolean).sort()
-        .map(v => `<option${v === cur ? ' selected' : ''}>${esc(v)}</option>`).join('');
-  };
-  fill($('#f-region'), all.map(r => r.region), '지역 전체');
-  fill($('#f-kind'), all.map(r => r.verdict.kind), '유형 전체');
+/* ---- 수집원별 최신 업데이트 ---- */
+function renderSources(){
+  const list = VIEW.sources || [];
+  const cls = s => s.state === '정상' ? 'ok' : (s.state === '실패' ? 'fail' : 'skip');
+  const when = s => s.last_success_at
+    ? s.last_success_at.replace('T',' ').slice(5,16) : '기록 없음';
+  $('#srcs').innerHTML = list.map(s => `
+    <div class="src" title="${esc(s.blocked_by || s.note || '')}">
+      <span class="dot ${cls(s)}"></span>
+      <span>${esc(s.name)}</span>
+      <span class="t">${s.state === '정상'
+        ? `${s.last_success_count ?? 0}건 · ${when(s)}`
+        : esc(s.blocked_by || s.state)}</span>
+    </div>`).join('');
+  const ok = list.filter(s => s.state === '정상').length;
+  const bad = list.filter(s => s.state === '실패').length;
+  $('#src-sum').textContent =
+    `정상 ${ok} · 실패 ${bad} · 대기 ${list.length - ok - bad}`;
 }
 
-function passes(r) {
-  const reg = $('#f-region').value, kind = $('#f-kind').value,
-        q = $('#f-q').value.trim().toLowerCase();
-  if (reg && r.region !== reg) return false;
-  if (kind && r.verdict.kind !== kind) return false;
-  if (q && !(r.title || '').toLowerCase().includes(q)) return false;
-  return true;
-}
-
-const PILL = { 추천: 'rec', 확인: 'chk', 제외: 'exc' };
-const DESC = {
-  추천: '내 조건에 구조적으로 맞는 공고',
-  확인: '가능성은 있지만 공고문을 봐야 하는 공고',
-  제외: '구조적으로 지원이 안 되는 공고 — 왜 빠졌는지 확인용',
-};
-
-function renderBuckets() {
-  $('#buckets').innerHTML = ['추천', '확인', '제외'].map(level => {
-    const rows = VIEW.buckets[level].filter(passes);
-    return `<section class="bucket">
-      <h2><span class="pill ${PILL[level]}">${level}</span>
-        <span>${rows.length}건</span>
-        <span class="meta">${DESC[level]}</span></h2>
-      ${rows.length ? rows.map(card).join('')
-        : '<div class="empty">해당하는 공고가 없습니다</div>'}
-    </section>`;
+/* ---- 알림 ---- */
+const ALERT_META = [
+  ['new', '새 공고', false],
+  ['closing', '마감 임박', true],
+  ['opening', '접수 시작', false],
+  ['today', '오늘 일정', false],
+  ['revised', '공고 변경', false],
+];
+function renderAlerts(){
+  const a = VIEW.alerts || {};
+  const d = (VIEW.stats || {}).remind_days ?? 3;
+  $('#alerts').innerHTML = ALERT_META.map(([id, lab, hot]) => {
+    const n = (a[id] || []).length;
+    const sub = id === 'closing' ? `${d}일 이내`
+      : id === 'opening' ? `${d}일 이내`
+      : id === 'new' ? '오늘 처음' : '';
+    return `<button class="alert ${hot && n ? 'hot' : ''}" data-alert="${id}"
+              aria-pressed="${ALERT===id}">
+        <span class="lab">${lab}${sub ? ` · ${sub}` : ''}</span>
+        <span class="num">${n}</span></button>`;
   }).join('');
 }
 
-function card(r) {
-  const v = r.verdict, dl = r.days_left;
-  const urgent = dl !== null && dl >= 0 && dl <= 3 && !r.closed;
-  const period = r.begin ? `${r.begin}${r.end && r.end !== r.begin ? ` ~ ${r.end}` : ''}` : '미정';
+/* ---- 필터 ---- */
+function allRows(){
+  const b = VIEW.buckets || {};
+  return [].concat(b['추천']||[], b['확인']||[], b['제외']||[]);
+}
+function fillFilters(){
+  const f = VIEW.facets || {};
+  const fill = (sel, items, label) => {
+    const cur = sel.value;
+    sel.innerHTML = `<option value="">${label}</option>` + (items||[]).map(i =>
+      `<option value="${esc(i.value)}"${i.value===cur?' selected':''}>${esc(i.value)} (${i.count})</option>`).join('');
+  };
+  fill($('#f-region'), f.regions, '지역 전체');
+  fill($('#f-kind'), f.kinds, '유형 전체');
+  fill($('#f-phase'), f.phases, '단계 전체');
+}
+function renderTags(){
+  const items = (VIEW.facets || {}).tags || [];
+  $('#f-tags').innerHTML = items.map(i =>
+    `<button class="chip" data-tag="${esc(i.value)}"
+       aria-pressed="${TAGS.has(i.value)}">${esc(i.value)} ${i.count}</button>`).join('');
+}
+
+function visibleRows(){
+  const reg = $('#f-region').value, kind = $('#f-kind').value,
+        phase = $('#f-phase').value, q = $('#f-q').value.trim().toLowerCase();
+  let rows;
+  if (ALERT) rows = (VIEW.alerts || {})[ALERT] || [];
+  else if (TAB === 'bookmark') rows = allRows().filter(r => r.bookmarked);
+  else if (TAB === 'all') rows = allRows();
+  else rows = (VIEW.buckets || {})[TAB] || [];
+
+  return rows.filter(r => {
+    if (reg && r.region !== reg) return false;
+    if (kind && r.verdict.kind !== kind) return false;
+    if (phase && r.phase !== phase) return false;
+    if (q && !(r.title||'').toLowerCase().includes(q)) return false;
+    if (TAGS.size && !r.verdict.tags.some(t => TAGS.has(t))) return false;
+    return true;
+  });
+}
+
+/* ================= 보기 ================= */
+function renderPane(){
+  $('#view-list').hidden = PANE !== 'list';
+  $('#view-cal').hidden = PANE !== 'cal';
+  $('#view-tl').hidden = PANE !== 'tl';
+  if (PANE === 'list') renderList();
+  else if (PANE === 'cal') renderCal();
+  else renderTimeline();
+}
+
+function renderList(){
+  const rows = visibleRows();
+  $('#list').innerHTML = rows.length
+    ? rows.map(card).join('')
+    : `<div class="empty">조건에 맞는 공고가 없습니다.<br>
+        필터를 풀거나 <b>내 조건</b>의 관심 지역·유형을 넓혀 보세요.</div>`;
+}
+
+/* 접수 시작 / 마감을 따로 보여준다 */
+function ddPills(r){
+  const out = [];
+  const lab = (n) => n === 0 ? '오늘' : (n > 0 ? `D-${n}` : `${-n}일 지남`);
+  if (r.begin){
+    const n = r.days_to_begin;
+    const cls = r.phase === '접수중' ? 'open' : (n !== null && n <= 3 ? 'soon' : '');
+    out.push(`<span class="pill ${cls}">접수 시작 <b>${r.begin.slice(5)}</b>${
+      n !== null ? ` · ${lab(n)}` : ''}</span>`);
+  }
+  if (r.end){
+    const n = r.days_left;
+    const cls = n !== null && n >= 0 && n <= 3 ? 'urgent' : (r.closed ? '' : 'soon');
+    out.push(`<span class="pill ${cls}">접수 마감 <b>${r.end.slice(5)}</b>${
+      n !== null ? ` · ${lab(n)}` : ''}</span>`);
+  } else if (r.begin){
+    out.push(`<span class="pill">마감일 <b>공고문 확인</b></span>`);
+  }
+  if (!r.begin && !r.end){
+    out.push(`<span class="pill">접수기간 <b>공고문 확인</b></span>`);
+  }
+  if (r.announce){
+    out.push(`<span class="pill">발표 <b>${r.announce.slice(5)}</b></span>`);
+  }
+  return `<div class="dd">${out.join('')}</div>`;
+}
+
+const ICON = {'충족':['met','○'], '미확인':['unk','?'], '불충족':['bad','×']};
+
+function checkLi(c){
+  const [cls, ic] = ICON[c.status] || ['unk','?'];
+  const src = c.source || {};
+  const badge = src.official
+    ? `<span class="src-note">${esc(src.label)}${src.asof ? ` · ${src.asof}` : ''}</span>`
+    : `<span class="src-note"><span class="sample">샘플 기준</span> ${esc(src.label)}${
+        src.asof ? ` · ${src.asof}` : ''}</span>`;
+  return `<li><span class="ic ${cls}">${ic}</span><span>
+      <span class="nm">${esc(c.name)}</span>${esc(c.detail)}
+      ${c.todo ? `<br><span class="todo">→ ${esc(c.todo)}</span>` : ''}
+      <br>${badge}</span></li>`;
+}
+
+function card(r){
+  const v = r.verdict, cnt = v.counts || {};
   const tags = [
     r.region && `<span class="tag">${esc(r.region)}</span>`,
     `<span class="tag k">${esc(v.kind)}</span>`,
-    r.category && `<span class="tag">${esc(r.category)}</span>`,
-    r.closed ? '<span class="tag">마감</span>'
-      : (dl !== null ? `<span class="tag d">D-${dl}</span>` : ''),
-  ].filter(Boolean).join(' ');
+    ...v.tags.slice(0,4).map(t => `<span class="tag g">${esc(t)}</span>`),
+    `<span class="tag src">${esc(r.source)}</span>`,
+    r.closed ? '<span class="tag">마감</span>' : '',
+  ].filter(Boolean).join('');
+
+  const areas = (r.areas||[]).slice(0,4)
+    .map(a => [a.name, a.exclusive].filter(Boolean).join(' '))
+    .filter(Boolean);
+
+  /* 금액은 숫자(price_min/max)에서 직접 만든다.
+     서버가 만들어 둔 문자열은 캐시 시점의 포맷이라 오래된 값이 섞일 수 있다. */
+  const priceText = (r.price_min != null)
+    ? (r.price_max != null && r.price_max !== r.price_min
+        ? `${won(r.price_min)} ~ ${won(r.price_max)}` : won(r.price_min))
+    : (r.price || '');
 
   const facts = [
-    `<b>접수</b> ${period}`,
-    r.announce && `<b>발표</b> ${r.announce}`,
-    r.households && `<b>규모</b> ${esc(r.households)}`,
-    r.price && `<b>공급금액</b> ${esc(r.price)}`,
-  ].filter(Boolean).join(' &nbsp;·&nbsp; ');
+    priceText && `<span><b>공급금액</b> ${esc(priceText)}</span>`,
+    areas.length && `<span><b>공급면적</b> ${esc(areas.join(', '))}${
+      (r.areas||[]).length > 4 ? ` 외 ${r.areas.length-4}` : ''}</span>`,
+    r.households && `<span><b>규모</b> ${esc(r.households)}</span>`,
+    r.address && `<span>${esc(r.address)}</span>`,
+  ].filter(Boolean).join('');
 
-  const why = [
-    ...v.blockers.map(x => `<div class="blk">${esc(x)}</div>`),
-    ...v.reasons.map(x => `<div>${esc(x)}</div>`),
-    ...v.tips.map(x => `<div class="tip">${esc(x)}</div>`),
-    `<div class="meta">청약통장: ${esc(v.account_label)}</div>`,
-  ].join('');
+  // 왜 이 판정인지 — 불충족 먼저, 그다음 미확인, 충족은 접어 둔다
+  const primary = [...(v.unmet||[]), ...(v.unknown||[])];
+  const folded = v.met || [];
 
   const links = [
-    r.doc_url && `<a href="${esc(r.doc_url)}" target="_blank" rel="noopener">모집공고문 PDF</a>`,
-    r.url && `<a href="${esc(r.url)}" target="_blank" rel="noopener">청약홈</a>`,
-  ].filter(Boolean).join(' &nbsp; ');
+    r.doc_url && `<a href="${esc(r.doc_url)}" target="_blank" rel="noopener">모집공고문</a>`,
+    r.url && `<a href="${esc(r.url)}" target="_blank" rel="noopener">신청 페이지</a>`,
+    r.phone && `<span class="src-note">${esc(r.phone)}</span>`,
+  ].filter(Boolean).join('');
 
-  return `<article class="card${urgent ? ' urgent' : ''}">
-    <div class="top"><span class="title">${esc(r.title)}</span>${tags}</div>
-    <div class="line">${facts}</div>
-    ${r.address ? `<div class="line meta">${esc(r.address)}</div>` : ''}
-    <div class="why">${why}</div>
-    ${links ? `<div class="line">${links}</div>` : ''}
+  const revs = (r.revisions||[]).slice(-3).map(x =>
+    `${esc(x.field)}: ${esc(x.from ?? '없음')} → ${esc(x.to ?? '없음')}`).join(' · ');
+
+  return `<article class="card lv-${v.level}" data-key="${esc(r.key)}">
+    <div class="ct">
+      <div class="title">${esc(r.title)}</div>
+      <button class="star" data-bm="${esc(r.key)}" aria-pressed="${!!r.bookmarked}"
+        title="관심 공고">${r.bookmarked ? '★' : '☆'}</button>
+    </div>
+    <div class="tags">${tags}</div>
+    ${ddPills(r)}
+    ${facts ? `<div class="facts">${facts}</div>` : ''}
+    <div class="verdict">
+      <div class="vsum">
+        <span class="n met">충족 ${cnt['충족']||0}</span>
+        <span class="n unk">미확인 ${cnt['미확인']||0}</span>
+        ${cnt['불충족'] ? `<span class="n bad">불충족 ${cnt['불충족']}</span>` : ''}
+        <span class="src-note">${esc(v.summary)}</span>
+      </div>
+      ${primary.length ? `<ul class="why">${primary.map(checkLi).join('')}</ul>` : ''}
+      ${folded.length ? `<details class="more"><summary>충족한 조건 ${folded.length}개 보기</summary>
+        <ul class="why">${folded.map(checkLi).join('')}</ul></details>` : ''}
+      ${(v.income && v.income.applies === false && v.income.note)
+        ? `<div class="src-note" style="margin-top:6px">· ${esc(v.income.note)}</div>` : ''}
+    </div>
+    ${revs ? `<div class="rev">공고 변경 — ${revs}</div>` : ''}
+    ${links ? `<div class="links">${links}</div>` : ''}
   </article>`;
 }
 
-function esc(s) {
-  return String(s ?? '').replace(/[&<>"']/g,
-    c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+/* ---- 캘린더 ---- */
+function renderCal(){
+  const byDate = {};
+  for (const c of VIEW.calendar || []) byDate[c.date] = c.items;
+  const keep = new Set(visibleRows().map(r => r.key));
+
+  const base = new Date(VIEW.today + 'T00:00:00');
+  const cur = new Date(base.getFullYear(), base.getMonth() + CAL_OFF, 1);
+  const y = cur.getFullYear(), m = cur.getMonth();
+  $('#cal-label').textContent = `${y}년 ${m+1}월`;
+
+  const first = new Date(y, m, 1).getDay();
+  const days = new Date(y, m+1, 0).getDate();
+  const pad = n => String(n).padStart(2,'0');
+
+  let cells = [];
+  for (let i=0;i<first;i++) cells.push(null);
+  for (let d=1;d<=days;d++) cells.push(d);
+  while (cells.length % 7) cells.push(null);
+
+  let html = '<table><thead><tr>' +
+    ['일','월','화','수','목','금','토'].map(w=>`<th>${w}</th>`).join('') +
+    '</tr></thead><tbody>';
+  for (let i=0;i<cells.length;i+=7){
+    html += '<tr>';
+    for (const d of cells.slice(i,i+7)){
+      if (d === null){ html += '<td class="off"></td>'; continue; }
+      const ds = `${y}-${pad(m+1)}-${pad(d)}`;
+      const items = (byDate[ds]||[]).filter(x => keep.has(x.key));
+      const uniq = [];
+      for (const it of items)
+        if (!uniq.some(u => u.key===it.key && u.event===it.event)) uniq.push(it);
+      html += `<td class="${ds===VIEW.today?'today':''}">
+        <div class="dnum">${d}</div>
+        ${uniq.slice(0,3).map(it =>
+          `<div class="ev ${it.level}" title="${esc(it.title)} · ${esc(it.event)}"
+            >${esc(it.event)} ${esc(it.title.slice(0,10))}</div>`).join('')}
+        ${uniq.length>3?`<div class="mono">+${uniq.length-3}</div>`:''}</td>`;
+    }
+    html += '</tr>';
+  }
+  $('#cal').innerHTML = html + '</tbody></table>';
 }
 
-/* ---------------- 새로고침 ---------------- */
-async function refresh() {
+/* ---- 주간 타임라인 (앞으로 14일) ---- */
+function renderTimeline(){
+  const byDate = {};
+  for (const c of VIEW.calendar || []) byDate[c.date] = c.items;
+  const keep = new Set(visibleRows().map(r => r.key));
+  const W = ['월','화','수','목','금','토','일'];
+  const base = new Date(VIEW.today + 'T00:00:00');
+
+  let html = '';
+  for (let i=0;i<14;i++){
+    const d = new Date(base.getTime() + i*86400000);
+    const ds = d.toISOString().slice(0,10);
+    const dow = (d.getDay()+6)%7;           // 0=월
+    const items = (byDate[ds]||[]).filter(x => keep.has(x.key));
+    const uniq = [];
+    for (const it of items)
+      if (!uniq.some(u => u.key===it.key && u.event===it.event)) uniq.push(it);
+    const cls = d.getDay()===6 ? 'sat' : (d.getDay()===0 ? 'sun' : '');
+    html += `<div class="tlrow ${uniq.length?'':'wk'}">
+      <div class="tld ${cls}">
+        <div class="d">${ds.slice(5)}${i===0?' (오늘)':''}</div>
+        <div class="w">${W[dow]}요일</div>
+      </div>
+      <div class="tli">${uniq.length
+        ? uniq.slice(0,6).map(it => `<div class="it">
+            <span class="ev ${it.level}">${esc(it.event)}</span>
+            <span>${esc(it.title)}</span></div>`).join('')
+            + (uniq.length>6?`<div class="tlnone">그 외 ${uniq.length-6}건</div>`:'')
+        : '<div class="tlnone">일정 없음</div>'}</div>
+    </div>`;
+  }
+  $('#tl').innerHTML = html;
+}
+
+/* ================= 새로고침 ================= */
+async function refresh(){
   const btn = $('#btn-refresh');
-  const r = await fetch('/api/refresh?enrich=true', { method: 'POST' });
-  if (r.status === 409) { toast('이미 수집 중입니다'); return; }
+  const r = await fetch('/api/refresh?enrich=true', {method:'POST'});
+  if (r.status === 409){ toast('이미 수집 중입니다'); return; }
   btn.disabled = true; btn.textContent = '수집 중…';
   clearInterval(POLL);
   POLL = setInterval(async () => {
@@ -344,107 +777,148 @@ async function refresh() {
     btn.disabled = false; btn.textContent = '새로고침';
     if (st.error) toast('수집 실패: ' + st.error, 6000);
     else {
-      const w = (st.result?.warnings || []).length;
-      toast(`수집 완료 — ${st.result?.count ?? 0}건` + (w ? ` (경고 ${w}건)` : ''));
+      const x = st.result || {};
+      toast(`수집 완료 — ${x.count ?? 0}건`
+        + (x.new_count ? ` · 새 공고 ${x.new_count}건` : '')
+        + (x.failed_sources?.length ? ` · 실패 ${x.failed_sources.join(',')}` : ''));
     }
     loadView();
   }, 1500);
 }
 
-/* ---------------- 내 조건 ---------------- */
-async function openProfile() {
+/* ================= 내 조건 ================= */
+async function openProfile(){
   const data = await (await fetch('/api/profile')).json();
   META = data.meta;
   const f = $('#pform'), p = data.profile;
 
   const opts = (name, list) => {
-    const sel = f.elements[name];
-    sel.innerHTML = list.map(v => `<option>${esc(v)}</option>`).join('');
+    f.elements[name].innerHTML = list.map(v=>`<option>${esc(v)}</option>`).join('');
   };
   opts('marital', META.marital);
   opts('household', META.household);
   opts('account_mode', META.account_mode);
   opts('residence', META.sido);
 
-  $('#regions').innerHTML = META.sido.map(s =>
+  $('#p-regions').innerHTML = META.sido.map(s =>
     `<label class="chk"><input type="checkbox" class="rg" value="${s}"
-      ${(p.regions || []).includes(s) ? 'checked' : ''}> ${s}</label>`).join('');
-  $('#wants').innerHTML = META.want_kinds.map(k =>
-    `<label class="chk"><input type="checkbox" class="wt" value="${k}"
-      ${p.want?.[k] ? 'checked' : ''}> ${k}</label>`).join('');
+      ${(p.regions||[]).includes(s)?'checked':''}> ${s}</label>`).join('');
+  $('#p-wants').innerHTML = META.want_kinds.map(k =>
+    `<label class="chk"><input type="checkbox" class="wt" value="${esc(k)}"
+      ${p.want?.[k]?'checked':''}> ${esc(k)}</label>`).join('');
 
-  for (const [k, val] of Object.entries(p)) {
+  for (const [k, val] of Object.entries(p)){
     const el = f.elements[k];
-    if (!el || el.length > 1 && !el.tagName) continue;
+    if (!el || !el.tagName) continue;
     if (el.type === 'checkbox') el.checked = !!val;
-    else if (el.tagName) el.value = val ?? '';
+    else el.value = (val ?? '');
   }
-  showIncomeHint();
-  $('#pmsg').textContent = data.saved ? '' : '아직 저장된 조건이 없습니다 — 기본값이 들어가 있습니다';
+  showCalc();
+  $('#pmsg').textContent = data.saved ? '' : '아직 저장된 조건이 없습니다 (기본값 표시)';
   $('#dlg').showModal();
 }
 
-function showIncomeHint() {
+function showCalc(){
   const f = $('#pform');
-  // income_base 키는 1~7 (7은 '7인 이상')
-  const n = Math.max(1, Math.min(7, Number(f.elements.household_size.value) || 1));
-  const base = META?.income_base?.[String(n)];
-  const inc = Number(f.elements.monthly_income.value) || 0;
-  if (!base) { $('#inc-hint').textContent = ''; return; }
-  const pct = inc ? ` · 내 소득 ${(inc * 10000 / base * 100).toFixed(1)}%` : '';
-  $('#inc-hint').textContent =
-    `${n}인 도시근로자 월평균소득 ${(base / 10000).toLocaleString()}만원${pct}`;
+  const num = n => Number(f.elements[n].value) || 0;
+  const hh = Math.max(1, Math.min(7, num('household_size') || 1));
+  const base = (META?.income_base || {})[String(hh)];
+  const inc = num('income_work') + num('income_business');
+  const na = num('assets') - num('debts');
+  const rows = [];
+  if (base) rows.push(['도시근로자 월평균소득 (' + hh + '인)', won(base/10000)]);
+  if (inc) rows.push(['입력 소득 합계', won(inc)
+    + (base ? ` · 기준의 ${(inc*10000/base*100).toFixed(1)}%` : '')]);
+  if (f.elements.assets.value !== '') rows.push(['순자산 (자산-부채)', won(na)]);
+  rows.push(['소득·자산 판정', '참고 신호만 — 적격 확정에 쓰지 않음']);
+  $('#calc').innerHTML = rows.map(([a,b]) =>
+    `<div class="r"><span>${esc(a)}</span><b>${esc(b)}</b></div>`).join('');
 }
 
-async function saveProfile(e) {
+async function saveProfile(e){
   const f = $('#pform');
   const num = n => { const v = f.elements[n].value; return v === '' ? null : Number(v); };
+  const str = n => f.elements[n].value.trim();
+  const bool = n => f.elements[n].checked;
   const body = {
-    birth: f.elements.birth.value.trim(),
-    marital: f.elements.marital.value,
-    household_size: num('household_size') ?? 1,
-    children: num('children') ?? 0,
-    newborn: f.elements.newborn.checked,
-    single_parent: f.elements.single_parent.checked,
-    homeless: f.elements.homeless.checked,
-    ever_owned: f.elements.ever_owned.checked,
-    household: f.elements.household.value,
-    household_homeless: f.elements.household_homeless.checked,
-    student: f.elements.student.checked,
-    monthly_income: num('monthly_income'),
-    assets: num('assets') ?? 0,
-    car: num('car') ?? 0,
-    low_income: f.elements.low_income.checked,
-    disabled: f.elements.disabled.checked,
-    artist_or_startup: f.elements.artist_or_startup.checked,
-    account_years: num('account_years') ?? 0,
+    birth: str('birth'), marital: str('marital'), marriage_date: str('marriage_date'),
+    household_size: num('household_size') ?? 1, children: num('children') ?? 0,
+    newborn: bool('newborn'), single_parent: bool('single_parent'),
+    is_householder: bool('is_householder'), household: str('household'),
+    household_homeless: bool('household_homeless'),
+    homeless: bool('homeless'), homeless_since: str('homeless_since'),
+    ever_owned: bool('ever_owned'), ever_won: bool('ever_won'),
+    residence: str('residence'), residence_since: str('residence_since'),
+    income_work: num('income_work'), income_business: num('income_business'),
+    assets: num('assets'), debts: num('debts') ?? 0, car: num('car') ?? 0,
+    has_account: bool('has_account'), account_opened: str('account_opened'),
     account_payments: num('account_payments') ?? 0,
-    has_account: f.elements.has_account.checked,
-    residence: f.elements.residence.value,
-    regions: [...document.querySelectorAll('.rg:checked')].map(x => x.value),
-    want: Object.fromEntries(
-      [...document.querySelectorAll('.wt')].map(x => [x.value, x.checked])),
-    account_mode: f.elements.account_mode.value,
+    account_recognized: num('account_recognized'),
+    employed: true, student: bool('student'), low_income: bool('low_income'),
+    disabled: bool('disabled'), artist_or_startup: bool('artist_or_startup'),
+    regions: $$('.rg:checked').map(x=>x.value),
+    want: Object.fromEntries($$('.wt').map(x=>[x.value, x.checked])),
+    max_price: num('max_price'), account_mode: str('account_mode'),
     remind_days: num('remind_days') ?? 3,
   };
   const r = await fetch('/api/profile', {
-    method: 'PUT', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  if (!r.ok) { e.preventDefault(); $('#pmsg').textContent = '저장 실패'; return; }
+    method:'PUT', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify(body)});
+  if (!r.ok){ e.preventDefault(); $('#pmsg').textContent = '저장 실패'; return; }
   toast('조건을 저장했습니다 — 판정을 다시 계산합니다');
   loadView();
 }
 
-/* ---------------- 바인딩 ---------------- */
+/* ================= 바인딩 ================= */
 $('#btn-refresh').onclick = refresh;
 $('#btn-profile').onclick = openProfile;
 $('#btn-save').onclick = saveProfile;
 $('#f-closed').onchange = loadView;
-for (const id of ['#f-region', '#f-kind']) $(id).onchange = renderBuckets;
-$('#f-q').oninput = renderBuckets;
+for (const id of ['#f-region','#f-kind','#f-phase']) $(id).onchange = renderPane;
+$('#f-q').oninput = renderPane;
+
+$('#stats').onclick = e => {
+  const b = e.target.closest('[data-tab]'); if (!b) return;
+  TAB = (TAB === b.dataset.tab) ? 'all' : b.dataset.tab;
+  ALERT = null; renderStats(); renderAlerts(); renderPane();
+};
+$('#alerts').onclick = e => {
+  const b = e.target.closest('[data-alert]'); if (!b) return;
+  ALERT = (ALERT === b.dataset.alert) ? null : b.dataset.alert;
+  renderAlerts(); renderPane();
+};
+$('#f-tags').onclick = e => {
+  const b = e.target.closest('[data-tag]'); if (!b) return;
+  const t = b.dataset.tag;
+  TAGS.has(t) ? TAGS.delete(t) : TAGS.add(t);
+  renderTags(); renderPane();
+};
+$('#views').onclick = e => {
+  const b = e.target.closest('[data-view]'); if (!b) return;
+  PANE = b.dataset.view;
+  $$('#views button').forEach(x => x.setAttribute('aria-selected', x === b));
+  renderPane();
+};
+$('#cal-prev').onclick = () => { CAL_OFF--; renderCal(); };
+$('#cal-next').onclick = () => { CAL_OFF++; renderCal(); };
+
+document.addEventListener('click', async e => {
+  const b = e.target.closest('[data-bm]'); if (!b) return;
+  const r = await fetch('/api/bookmark', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({key: b.dataset.bm})});
+  if (!r.ok) { toast('북마크 실패'); return; }
+  const { bookmarked } = await r.json();
+  for (const row of allRows()) if (row.key === b.dataset.bm) row.bookmarked = bookmarked;
+  b.setAttribute('aria-pressed', bookmarked);
+  b.textContent = bookmarked ? '★' : '☆';
+  renderStats();
+  if (TAB === 'bookmark') renderPane();
+});
+
 $('#pform').addEventListener('input', e => {
-  if (['household_size', 'monthly_income'].includes(e.target.name)) showIncomeHint();
+  if (['household_size','income_work','income_business','assets','debts']
+      .includes(e.target.name)) showCalc();
 });
 
 loadView();

@@ -1,8 +1,13 @@
 """내 조건 프로필.
 
-cheongyak-auto(MIT) 의 `cheong/profile.py` 스키마를 각색했다.
-웹앱이므로 대화형 설문은 빼고, 파일 로드/저장 + 웹 UI 에서 쓰는 메타만 남겼다.
-profile.json 은 .gitignore 에 들어 있다 — 개인정보라 커밋하지 않는다.
+cheongyak-auto(MIT) 의 스키마에서 출발해 청약 자격 판정에 필요한 항목을 넓혔다.
+  - 소득을 근로/사업으로 나눴다 (인정 방식이 다르다)
+  - 자산에 부채를 더해 순자산을 볼 수 있게 했다
+  - 거주기간을 넣었다 (해당지역 우선공급 요건)
+  - 청약통장을 가입일·납입횟수·납입인정금액으로 쪼갰다
+  - 희망 최대 분양가를 넣었다
+
+profile.json 은 .gitignore 에 있다 — 생년·소득·자산이 들어가므로 커밋하지 않는다.
 """
 from __future__ import annotations
 
@@ -18,40 +23,66 @@ ROOT = Path(__file__).resolve().parent.parent
 PROFILE_FILE = ROOT / "profile.json"
 
 DEFAULT: dict = {
-    "birth": "",                  # YYYY-MM-DD 또는 YYYY
-    "marital": "미혼",            # 미혼 | 예비신혼 | 신혼 | 기혼
-    "household_size": 1,          # 가구원 수 (소득 기준 계산에 쓰인다)
-    "children": 0,
-    "newborn": False,             # 2세 미만 자녀 또는 임신 중
+    # ---- 기본 ----
+    "birth": "",                   # YYYY-MM-DD 또는 YYYY
+    "marital": "미혼",             # 미혼 | 예비신혼 | 신혼 | 기혼
+    "marriage_date": "",           # 혼인신고일 (신혼 7년 이내 판단)
+    "household_size": 1,           # 가구원 수
+    "children": 0,                 # 미성년 자녀 수
+    "newborn": False,              # 2세 미만 자녀 또는 임신 중
     "single_parent": False,
 
-    "homeless": True,             # 본인 무주택
-    "ever_owned": False,          # 과거 주택 소유 이력
-    "household": "단독세대주",     # 단독세대주 | 부모님세대원 | 기타
-    "household_homeless": True,   # 세대원 전원 무주택
+    # ---- 세대 ----
+    "is_householder": True,        # 본인이 세대주인가
+    "household": "단독세대주",      # 단독세대주 | 부모님세대원 | 기타
+    "household_homeless": True,    # 세대원 전원 무주택
 
+    # ---- 주택 보유 ----
+    "homeless": True,              # 본인 무주택
+    "homeless_since": "",          # 무주택 기간 기산일 (YYYY-MM)
+    "ever_owned": False,           # 과거 주택 소유 이력
+    "ever_won": False,             # 과거 청약 당첨 이력 (재당첨 제한)
+
+    # ---- 거주 ----
+    "residence": "서울",           # 현재 거주 시도
+    "residence_since": "",         # 해당 지역 전입일 (YYYY-MM)
+
+    # ---- 소득 (월, 만원) ----
+    "income_work": None,           # 근로소득 (세전 월평균)
+    "income_business": None,       # 사업·기타소득 (월 환산)
+    "monthly_income": None,        # 구버전 호환 — 쓰지 않는다
+
+    # ---- 자산 (만원) ----
+    "assets": None,                # 총자산 (부동산·예금·전세보증금 등)
+    "debts": 0,                    # 총부채
+    "car": 0,                      # 자동차가액
+
+    # ---- 청약통장 ----
+    "has_account": True,
+    "account_opened": "",          # 가입일 (YYYY-MM-DD 또는 YYYY-MM)
+    "account_payments": 0,         # 납입 횟수
+    "account_recognized": None,    # 납입인정금액 (만원)
+
+    # ---- 계층 ----
     "employed": True,
     "student": False,
-    "monthly_income": None,       # 세전 월소득 (만원)
-    "assets": 0,                  # 총자산 (만원)
-    "car": 0,                     # 자동차가액 (만원)
-    "low_income": False,
+    "low_income": False,           # 기초수급·차상위
     "disabled": False,
     "artist_or_startup": False,
 
-    "account_years": 0,           # 청약통장 가입 기간 (년)
-    "account_payments": 0,        # 납입 횟수
-    "has_account": True,          # 청약통장 보유 여부
-
-    "residence": "서울",
+    # ---- 희망 조건 ----
     "regions": ["서울", "경기", "인천"],
+    "max_price": None,             # 희망 최대 분양가 (만원)
     "want": {
-        "임대": True, "공공분양": True, "민영분양": True,
-        "오피스텔": False, "민간임대": True,
+        "민영분양": True, "공공분양": True, "무순위": True,
+        "공공임대": True, "민간임대": True, "오피스텔": False,
     },
-    "account_mode": "상관없음",    # 상관없음 | 가입만까지 | 불필요만
-    "remind_days": 3,             # 마감 N일 전부터 알림
+    "account_mode": "상관없음",     # 상관없음 | 가입만까지 | 불필요만
+    "remind_days": 3,
 }
+
+# 구버전 키 → 새 키
+_MIGRATE = {"monthly_income": "income_work"}
 
 
 def load() -> dict:
@@ -71,6 +102,10 @@ def merge(data: Optional[dict]) -> dict:
     if data:
         prof.update({k: v for k, v in data.items() if k in DEFAULT})
         prof["want"] = {**DEFAULT["want"], **(data.get("want") or {})}
+        # 구버전 프로필: monthly_income 만 있으면 근로소득으로 옮긴다
+        for old, new in _MIGRATE.items():
+            if data.get(old) not in (None, "") and prof.get(new) in (None, ""):
+                prof[new] = data[old]
     if not prof.get("regions"):
         prof["regions"] = []
     return prof
@@ -88,6 +123,7 @@ def exists() -> bool:
     return PROFILE_FILE.exists() or bool(os.environ.get("PROFILE_JSON"))
 
 
+# ---------------------------------------------------------------- 파생값
 def age(prof: dict, today: Optional[date] = None) -> Optional[int]:
     """만 나이. 연도만 주면 그 해 12-31 생으로 보수적으로 잡는다."""
     today = today or today_kst()
@@ -100,3 +136,74 @@ def age(prof: dict, today: Optional[date] = None) -> Optional[int]:
     if d is None:
         return None
     return today.year - d.year - ((today.month, today.day) < (d.month, d.day))
+
+
+def _months_between(since: str, today: date) -> Optional[int]:
+    d = parse_date(since)
+    if d is None:
+        # 'YYYY-MM' 형태 허용
+        s = str(since or "").strip()
+        if len(s) >= 7 and s[:4].isdigit() and s[5:7].isdigit():
+            try:
+                d = date(int(s[:4]), int(s[5:7]), 1)
+            except ValueError:
+                return None
+        else:
+            return None
+    return (today.year - d.year) * 12 + (today.month - d.month)
+
+
+def residence_months(prof: dict, today: Optional[date] = None) -> Optional[int]:
+    """현재 거주 지역 거주기간(개월). 전입일 미입력이면 None."""
+    return _months_between(prof.get("residence_since", ""), today or today_kst())
+
+
+def account_months(prof: dict, today: Optional[date] = None) -> Optional[int]:
+    """청약통장 가입기간(개월). 가입일 미입력이면 None."""
+    return _months_between(prof.get("account_opened", ""), today or today_kst())
+
+
+def account_years(prof: dict, today: Optional[date] = None) -> Optional[float]:
+    m = account_months(prof, today)
+    return None if m is None else round(m / 12, 1)
+
+
+def marriage_years(prof: dict, today: Optional[date] = None) -> Optional[float]:
+    m = _months_between(prof.get("marriage_date", ""), today or today_kst())
+    return None if m is None else round(m / 12, 1)
+
+
+def is_newlywed(prof: dict, today: Optional[date] = None) -> bool:
+    """신혼부부 범위(혼인 7년 이내) 또는 예비신혼·신생아·한부모."""
+    if prof.get("marital") == "예비신혼":
+        return True
+    if prof.get("newborn") or prof.get("single_parent"):
+        return True
+    if prof.get("marital") in ("신혼", "기혼"):
+        y = marriage_years(prof, today)
+        if y is None:
+            return prof.get("marital") == "신혼"
+        return y <= 7
+    return False
+
+
+def derived(prof: dict, today: Optional[date] = None) -> dict:
+    """화면에 같이 보여줄 파생값 모음."""
+    today = today or today_kst()
+    from .rules import income_base, income_ratio, net_assets
+
+    return {
+        "age": age(prof, today),
+        "residence_months": residence_months(prof, today),
+        "account_months": account_months(prof, today),
+        "account_years": account_years(prof, today),
+        "marriage_years": marriage_years(prof, today),
+        "is_newlywed": is_newlywed(prof, today),
+        "income_total": (None if prof.get("income_work") in (None, "")
+                         and prof.get("income_business") in (None, "")
+                         else int(prof.get("income_work") or 0)
+                         + int(prof.get("income_business") or 0)),
+        "income_base_manwon": income_base(prof.get("household_size", 1)) // 10_000,
+        "income_ratio": income_ratio(prof),
+        "net_assets": net_assets(prof),
+    }
