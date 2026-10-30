@@ -391,7 +391,9 @@ def build_view(prof: dict, today: Optional[date] = None,
 
     # 급한 것이 위로 — 접수중(마감 가까운 순) → 예정(시작 가까운 순) → 나머지
     def urgency(r):
-        phase_rank = {"접수중": 0, "예정": 1, "발표대기": 2, "미정": 3, "마감": 4}
+        # '마감전(시작일 미상)'은 지금 판단해야 할 수 있으니 접수중 바로 뒤에 둔다
+        phase_rank = {"접수중": 0, "마감전(시작일 미상)": 1, "예정": 2,
+                      "발표대기": 3, "미정": 4, "마감": 5}
         dl = r.get("days_left")
         db = r.get("days_to_begin")
         primary = dl if dl is not None else (db if db is not None else 9999)

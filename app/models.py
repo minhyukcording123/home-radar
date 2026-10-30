@@ -138,7 +138,14 @@ class Notice:
         return None if self.announce is None else (self.announce - today).days
 
     def phase(self, today: date) -> str:
-        """예정 / 접수중 / 마감 / 발표대기 / 미정."""
+        """예정 / 접수중 / 마감전(시작일 미상) / 발표대기 / 마감 / 미정.
+
+        '접수중'이라고 단정하려면 **접수 시작일을 알아야 한다.** LH 공고는
+        상세 API 가 승인되지 않으면 마감일만 오는데, 그때 '접수중'으로 찍으면
+        아직 시작하지 않은 공고까지 접수중으로 보여 준다(238건이 그랬다).
+        그래서 시작일을 모르면 '마감전(시작일 미상)'으로 구분한다 —
+        마감 전이라는 사실만 말하고 시작 여부는 주장하지 않는다.
+        """
         if self.begin is None and self.end is None:
             return "미정"
         if self.begin is not None and today < self.begin:
@@ -147,6 +154,8 @@ class Notice:
             if self.announce is not None and today <= self.announce:
                 return "발표대기"
             return "마감"
+        if self.begin is None:
+            return "마감전(시작일 미상)"
         return "접수중"
 
     def to_dict(self):

@@ -150,6 +150,20 @@ class TestNoticeDates(unittest.TestCase):
         self.assertEqual(mk("x", begin=date(2026, 10, 20), end=date(2026, 10, 25),
                             announce=date(2026, 11, 5)).phase(TODAY), "발표대기")
 
+    def test_phase_without_begin_does_not_claim_open(self):
+        """회귀: 시작일을 모르면 '접수중'이라고 단정하지 않는다.
+
+        LH 상세 API 가 미승인이면 마감일만 온다. 그때 '접수중'으로 찍으면
+        아직 시작하지 않은 공고까지 접수중으로 보여 준다.
+        """
+        self.assertEqual(mk("x", end=date(2026, 11, 8)).phase(TODAY),
+                         "마감전(시작일 미상)")
+        # 마감일이 지났으면 그대로 마감이다
+        self.assertEqual(mk("x", end=date(2026, 10, 20)).phase(TODAY), "마감")
+        # 시작일을 알면 정상 판정
+        self.assertEqual(mk("x", begin=date(2026, 10, 29),
+                            end=date(2026, 11, 8)).phase(TODAY), "접수중")
+
     def test_closed_falls_back_to_posted(self):
         self.assertTrue(mk("x", posted=date(2026, 10, 1)).is_closed(TODAY))
         self.assertFalse(mk("x", posted=date(2026, 10, 20)).is_closed(TODAY))
