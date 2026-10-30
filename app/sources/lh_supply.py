@@ -13,21 +13,18 @@
 **응답 필드** — 포털 문서의 출력결과 표는 토지 변형만 싣고 있다:
   SS_CODE · RS_DTTM · LND_US_DS_CD_NM(공급용도) · LGDN_DTL_ADR(소재지) ·
   LNO(지번) · AR(면적) · SPL_XPC_AMT(예정가격)
-주택 변형의 필드는 문서에 없어서, 이 API 를 라이브로 호출해 검증한
-ChungYak 프로젝트(HurKyungsoo/ChungYak LhClient.java + issue #30,
-2026-10 라이브 400건 확인)의 결과를 근거로 삼았다:
-  - 세그먼트: dsList01~dsList04 (dsList01Nm 같은 *Nm 은 컬럼 라벨 행)
-  - 주택형:   HTY_NM(분양) / HTY_NNA(행복주택 등 — 유형그룹마다 이름이 다르다)
-  - 전용면적: RSDN_DDO_AR / DDO_AR   공급면적: SPL_AR
-  - 세대수:   SIL_HSH_CNT / NOW_HSH_CNT (이번 공급) · TOT_HSH_CNT / HSH_CNT (총)
-  - 분양가:   SIL_AMT                보증금: LS_GMY   월임대료: MM_RFE / RFE
-  - 금액 단위는 **원**이다 (SIL_AMT 샘플 353,694,000 = 3.5억 /
-    포털 문서 SPL_XPC_AMT 샘플 58,713,800,000 / 월임대료 292,150원).
+주택 변형은 문서에 없어서 **2026-10-30 실제 호출로 확인**했다
+(유형별 필드명은 아래 _TEXT_CANDIDATES / _NUM_CANDIDATES 주석에 적어 뒀다).
+확인한 사실:
+  - 세그먼트: dsList01~dsList04 (dsList01Nm 같은 *Nm 은 컬럼 라벨 행이라 제외)
+  - **금액 단위는 원**이다 (분양 SIL_AMT 실측 407,471,000 = 4.07억).
     Notice.price_min/max 는 만원 단위이므로 여기 값을 그쪽에 바로 넣으면 안 된다.
-  - 임대 유형 다수(국민·영구·행복·통합공공임대 등)는 LS_GMY/RFE 가
-    "공고문 참조" 같은 **문자열**로 온다 → 숫자 파싱 실패 시 *_raw 로 보존.
-  - 매입임대(13)는 금액 필드 자체가 없고, dsList 가 [{}](전부 null 1행)로
-    오는 공고도 있다 → 오류가 아니라 empty=True 로 취급한다.
+  - 임대·신혼희망타운은 보증금(LS_GMY)·월임대료(RFE)가 **"공고문 참조" 문자열**로
+    오는 경우가 많다 → 0 으로 채우지 않고 *_raw 로 원문을 보존한다.
+    금액이 0 으로 보이면 '공짜'로 오독된다.
+  - 매입임대(13)는 주택형·세대수 대신 **호별 주소(ADR/DNG_HS_ADR)와
+    층(VLD_VL_NM)** 으로 온다. 유형마다 모양이 전혀 달라 후보 목록으로 흡수한다.
+  - 공급정보가 아예 없는 공고도 정상적으로 있다 → 오류가 아니라 empty=True.
 
 재시도·백오프·오류분류(LhAuthError/LhQuotaError)·키 스크러빙은 전부
 lh._request() 를 재사용한다 — 같은 게이트웨이(B552555)라 오류 응답 형식이 같다.
@@ -49,19 +46,35 @@ SPL_URL = ("https://apis.data.go.kr/B552555/lhLeaseNoticeSplInfo1/"
            "getLeaseNoticeSplInfo1")
 
 # 캐시 스키마 — 정규화 형식을 바꾸면 올려서 구버전 캐시를 자연히 무효화한다
-SCHEMA = 1
+SCHEMA = 2
 CACHE_PREFIX = "LH공급:"
 
 # 정규화 결과의 항목 순서 (available/missing 계산에 쓴다)
 FIELDS = ("complex", "house_type", "exclusive_area", "supply_area",
-          "units", "total_units", "deposit", "rent", "price")
+          "units", "total_units", "deposit", "rent", "price",
+          "address", "floor")
 
-# 응답 필드 후보 — 유형그룹마다 필드명이 달라서 후보 목록으로 흡수한다.
-# 앞쪽일수록 우선. 토지 변형(LND_US_DS_CD_NM/AR/SPL_XPC_AMT)도 같은 틀로 담는다.
+# 응답 필드 후보 — 유형그룹마다 필드명이 달라서 후보 목록으로 흡수한다. 앞쪽일수록 우선.
+#
+# 2026-10-30 실제 응답으로 확인한 변형 (키 발급 후 라이브 검증):
+#   임대·신혼희망타운 : HTY_NNA · DDO_AR · SPL_AR · NOW_HSH_CNT · HSH_CNT
+#                      · LS_GMY · RFE · SBD_LGO_NM(단지명)
+#   분양             : HTY_NM · RSDN_DDO_AR · SPL_AR · SIL_HSH_CNT
+#                      · TOT_HSH_CNT · SIL_AMT(분양가) · BZDT_NM(사업지구명)
+#   매입임대(일반)    : ADR(주소) · DDO_AR · HO_NO · SBD_LGO_NM · VLD_VL_NM(층)
+#   매입임대(다자녀)  : DNG_HS_ADR(주소) · LTR_SPL_RMNO · QUP_CNT · SGG_NM(시군구)
+#   토지             : LND_US_DS_CD_NM · LGDN_DTL_ADR · AR · SPL_XPC_AMT
+#
+# QUP_CNT·LTR_SPL_RMNO·HO_NO 는 의미를 확정하지 못해 매핑하지 않았다 —
+# 추측해서 세대수로 쓰면 틀린 숫자를 사실처럼 보여주게 된다.
 _TEXT_CANDIDATES = {
-    "complex": ("LGDN_DTL_ADR",),            # 토지의 소재지. 주택 변형엔 단지명
-                                             # 필드가 없다(라이브 픽스처로 확인)
+    # 단지명 — 임대는 SBD_LGO_NM, 분양은 BZDT_NM(사업지구명).
+    # 매입임대(다자녀)는 단지명이 없어 시군구로 대체한다.
+    "complex": ("SBD_LGO_NM", "BZDT_NM", "SGG_NM", "LGDN_DTL_ADR"),
     "house_type": ("HTY_NM", "HTY_NNA", "LND_US_DS_CD_NM"),
+    # 매입임대는 주택형 대신 호별 주소·층으로 온다
+    "address": ("ADR", "DNG_HS_ADR"),
+    "floor": ("VLD_VL_NM",),
 }
 _NUM_CANDIDATES = {
     "exclusive_area": ("RSDN_DDO_AR", "DDO_AR", "AR"),   # ㎡

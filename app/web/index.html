@@ -583,12 +583,49 @@ html[data-theme="dark"] .toast{background:#e8ecf1;color:#15181d}
         </div>
       </fieldset>
 
-      <fieldset><legend>소득 · 자산</legend>
+      <fieldset><legend>소득 — 본인</legend>
         <div class="grid">
           <label class="f"><span>근로소득 (세전 월, 만원)</span>
             <input type="number" name="income_work" min="0" placeholder="330"></label>
           <label class="f"><span>사업·기타소득 (월 환산, 만원)</span>
             <input type="number" name="income_business" min="0" placeholder="0"></label>
+        </div>
+        <div class="hint">
+          도시근로자 월평균소득표와 기준 중위소득표는
+          <b>2026년 공식 기준</b>(마이홈포털·보건복지부 고시)을 씁니다.
+          그래서 국민임대·행복주택·통합공공임대·신혼희망타운 같은 유형은
+          실제로 충족·불충족을 판정합니다.
+          <br><br>
+          다만 <b>사업소득이 있으면 소득 판정을 확정하지 않습니다.</b>
+          근로소득과 사업소득의 인정 방식이 다르고(사업소득은 종합소득세 신고 기준)
+          가구원 합산 범위도 공고별로 달라, 두 값을 합쳐 '소득 인정액'이라고
+          부르지 않습니다 — 합산값은 참고로만 보여주고 해당 조건은
+          <b>'확인 필요'</b>로 남깁니다. 공고문에 별도 기준이 있으면 공고문이 우선합니다.
+        </div>
+      </fieldset>
+
+      <fieldset><legend>소득 — 배우자 (신혼 유형 판정에 쓰인다)</legend>
+        <div class="cgrid">
+          <label class="chk"><input type="checkbox" name="dual_income"> 맞벌이</label>
+        </div>
+        <div class="grid" style="margin-top:10px">
+          <label class="f"><span>배우자 근로소득 (월, 만원)</span>
+            <input type="number" name="spouse_income_work" min="0"
+              placeholder="없으면 0"></label>
+          <label class="f"><span>배우자 사업·기타소득 (월, 만원)</span>
+            <input type="number" name="spouse_income_business" min="0"
+              placeholder="0"></label>
+        </div>
+        <div class="hint">
+          신혼부부 유형은 <b>외벌이와 맞벌이 한도가 다릅니다</b>
+          (행복주택 100%/120%, 신혼희망타운 130%/200%).
+          배우자 소득을 비우면 두 한도 사이는 <b>'확인 필요'</b>로 남습니다 —
+          <b>외벌이면 0을 적어 주세요.</b> 그러면 판정이 확정됩니다.
+        </div>
+      </fieldset>
+
+      <fieldset><legend>자산</legend>
+        <div class="grid">
           <label class="f"><span>총자산 (만원)</span>
             <input type="number" name="assets" min="0" placeholder="9000"></label>
           <label class="f"><span>총부채 (만원)</span>
@@ -598,16 +635,10 @@ html[data-theme="dark"] .toast{background:#e8ecf1;color:#15181d}
         </div>
         <div class="calc" id="calc"></div>
         <div class="hint">
-          도시근로자 월평균소득표와 기준 중위소득표는
-          <b>2026년 공식 기준</b>(마이홈포털·보건복지부 고시)을 쓴다.
-          그래서 국민임대·행복주택·통합공공임대·신혼희망타운 같은 유형은
-          실제로 충족·불충족을 판정한다.
-          <br><br>
-          다만 <b>사업소득이 있으면 소득 판정을 확정하지 않는다.</b>
-          근로소득과 사업소득의 인정 방식이 다르고(사업소득은 종합소득세 신고 기준)
-          가구원 합산 범위도 공고별로 달라서, 두 값을 합쳐 '소득 인정액'이라고
-          부르지 않는다 — 합산값은 참고로만 보여주고 해당 조건은
-          <b>'확인 필요'</b>로 남긴다. 공고문에 별도 기준이 있으면 공고문이 우선한다.
+          공공 유형은 <b>총자산·자동차가액 상한</b>이 있습니다.
+          순자산은 총자산에서 부채를 뺀 값으로 봅니다.
+          부동산가액만 따로 보는 기준(특별공급·뉴:홈)은 총자산이 한도 이하일 때만
+          충족으로 확정하고, 그 밖에는 <b>'확인 필요'</b>로 남깁니다.
         </div>
       </fieldset>
 
@@ -1307,14 +1338,26 @@ function showCalc(){
   const num = n => Number(f.elements[n].value) || 0;
   const hh = Math.max(1, Math.min(7, num('household_size') || 1));
   const base = (META?.income_base || {})[String(hh)];
-  const inc = num('income_work') + num('income_business');
+  const mine = num('income_work') + num('income_business');
+  const spouseFilled = f.elements.spouse_income_work.value !== ''
+    || f.elements.spouse_income_business.value !== '';
+  const spouse = num('spouse_income_work') + num('spouse_income_business');
+  const inc = mine + (spouseFilled ? spouse : 0);
   const na = num('assets') - num('debts');
   const rows = [];
   if (base) rows.push(['도시근로자 월평균소득 (' + hh + '인)', won(base/10000)]);
-  if (inc) rows.push(['입력 소득 합계', won(inc)
+  if (mine) rows.push(['본인 소득', won(mine)]);
+  if (spouseFilled) rows.push(['배우자 소득', won(spouse)
+    + (spouse > 0 ? ' · 맞벌이' : ' · 외벌이 확정')]);
+  if (inc) rows.push(['합계 (참고)', won(inc)
     + (base ? ` · 기준의 ${(inc*10000/base*100).toFixed(1)}%` : '')]);
   if (f.elements.assets.value !== '') rows.push(['순자산 (자산-부채)', won(na)]);
-  rows.push(['소득·자산 판정', '참고 신호만 — 적격 확정에 쓰지 않음']);
+  // 신혼 유형은 배우자 소득이 없으면 외벌이/맞벌이 한도 사이가 확정되지 않는다
+  const married = ['예비신혼', '신혼', '기혼'].includes(f.elements.marital.value);
+  if (married && !spouseFilled)
+    rows.push(['신혼 유형 판정', '배우자 소득 미입력 — 확인 필요로 남습니다']);
+  if (num('income_business') || num('spouse_income_business'))
+    rows.push(['사업소득 있음', '합산값으로 적격을 확정하지 않습니다']);
   $('#calc').innerHTML = rows.map(([a,b]) =>
     `<div class="r"><span>${esc(a)}</span><b>${esc(b)}</b></div>`).join('');
 }
@@ -1334,6 +1377,9 @@ async function saveProfile(e){
     ever_owned: bool('ever_owned'), ever_won: bool('ever_won'),
     residence: str('residence'), residence_since: str('residence_since'),
     income_work: num('income_work'), income_business: num('income_business'),
+    dual_income: bool('dual_income'),
+    spouse_income_work: num('spouse_income_work'),
+    spouse_income_business: num('spouse_income_business'),
     assets: num('assets'), debts: num('debts') ?? 0, car: num('car') ?? 0,
     has_account: bool('has_account'), account_opened: str('account_opened'),
     account_payments: num('account_payments') ?? 0,
@@ -1425,7 +1471,8 @@ document.addEventListener('click', async e => {
 });
 
 $('#pform').addEventListener('input', e => {
-  if (['household_size','income_work','income_business','assets','debts']
+  if (['household_size','income_work','income_business','assets','debts',
+       'spouse_income_work','spouse_income_business','dual_income','marital']
       .includes(e.target.name)) showCalc();
 });
 

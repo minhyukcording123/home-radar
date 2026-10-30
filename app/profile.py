@@ -48,9 +48,19 @@ DEFAULT: dict = {
     "residence_since": "",         # 해당 지역 전입일 (YYYY-MM)
 
     # ---- 소득 (월, 만원) ----
-    "income_work": None,           # 근로소득 (세전 월평균)
-    "income_business": None,       # 사업·기타소득 (월 환산)
+    # 근로소득과 사업소득을 나눠 받는다. 청약 소득 심사에서 인정 방식이 다르다
+    # (사업소득은 종합소득세 신고 기준) — 합쳐서 '소득 인정액'이라고 부르지 않는다.
+    "income_work": None,           # 본인 근로소득 (세전 월평균)
+    "income_business": None,       # 본인 사업·기타소득 (월 환산)
     "monthly_income": None,        # 구버전 호환 — 쓰지 않는다
+
+    # ---- 배우자 소득 (월, 만원) ----
+    # 신혼부부 유형은 외벌이/맞벌이 한도가 다르다(행복주택 100/120,
+    # 신혼희망타운 130/200). 배우자 소득을 모르면 두 한도 사이가 '확인 필요'로
+    # 남으므로, 입력하면 판정이 좁혀진다.
+    "dual_income": False,          # 맞벌이 여부 (배우자 소득이 있는가)
+    "spouse_income_work": None,    # 배우자 근로소득
+    "spouse_income_business": None,  # 배우자 사업·기타소득
 
     # ---- 자산 (만원) ----
     "assets": None,                # 총자산 (부동산·예금·전세보증금 등)
@@ -187,6 +197,34 @@ def is_newlywed(prof: dict, today: Optional[date] = None) -> bool:
     return False
 
 
+def spouse_income(prof: dict) -> Optional[int]:
+    """배우자 월소득 합계(만원). 둘 다 미입력이면 None."""
+    w, b = prof.get("spouse_income_work"), prof.get("spouse_income_business")
+    if w in (None, "") and b in (None, ""):
+        return None
+    return int(w or 0) + int(b or 0)
+
+
+def is_dual_income(prof: dict) -> Optional[bool]:
+    """맞벌이인가. 판단할 근거가 없으면 None (= 확정하지 않는다).
+
+    근거 순서:
+      1. 배우자 소득을 입력했다 → 0보다 크면 맞벌이, 0이면 외벌이로 확정
+      2. 맞벌이 체크박스를 켰다 → 맞벌이로 확정
+      3. 미혼이면 맞벌이가 성립하지 않는다 → 외벌이로 확정
+      4. 그 밖에는 None — 신혼 유형에서 외벌이/맞벌이 한도 사이가
+         '확인 필요'로 남는다 (함부로 유리하게 잡지 않는다)
+    """
+    sp = spouse_income(prof)
+    if sp is not None:
+        return sp > 0
+    if prof.get("dual_income"):
+        return True
+    if prof.get("marital") == "미혼":
+        return False
+    return None
+
+
 def derived(prof: dict, today: Optional[date] = None) -> dict:
     """화면에 같이 보여줄 파생값 모음."""
     today = today or today_kst()
@@ -194,6 +232,8 @@ def derived(prof: dict, today: Optional[date] = None) -> dict:
 
     return {
         "age": age(prof, today),
+        "spouse_income": spouse_income(prof),
+        "is_dual_income": is_dual_income(prof),
         "residence_months": residence_months(prof, today),
         "account_months": account_months(prof, today),
         "account_years": account_years(prof, today),

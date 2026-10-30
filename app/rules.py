@@ -143,8 +143,13 @@ def income_base(household_size: int) -> int:
     return MONTHLY_INCOME_BASE.get(min(n, 7), MONTHLY_INCOME_BASE[7])
 
 
-def recognized_monthly_income(prof: dict) -> Optional[int]:
-    """공식 '소득 인정' 기준에 맞춘 월소득 — 지금은 계산하지 않는다.
+def recognized_monthly_income(prof: dict,
+                              include_spouse: bool = False) -> Optional[int]:
+    """참고용 월소득 합계(만원). `include_spouse` 면 배우자 소득도 더한다.
+
+    배우자 소득을 더하는 건 기준의 소득 범위(scope)가 '본인+배우자'나 '세대'일
+    때만이다 — 호출하는 쪽(eligibility)이 기준을 보고 결정한다.
+    배우자 소득을 입력하지 않았으면 더하지 않는다 (없는 값을 0으로 보지 않는다).
 
     청약 소득 심사는 근로소득과 사업소득의 인정 방식이 다르고(사업소득은
     종합소득세 신고 기준, 근로소득은 세전 월평균 등) 가구원 합산 범위도
@@ -156,11 +161,30 @@ def recognized_monthly_income(prof: dict) -> Optional[int]:
     """
     work = prof.get("income_work")
     biz = prof.get("income_business")
+    own: Optional[int]
     if work in (None, "") and biz in (None, ""):
         # 구버전 프로필 호환
         legacy = prof.get("monthly_income")
-        return int(legacy) if legacy not in (None, "") else None
-    return int(work or 0) + int(biz or 0)
+        own = int(legacy) if legacy not in (None, "") else None
+    else:
+        own = int(work or 0) + int(biz or 0)
+
+    if not include_spouse:
+        return own
+
+    sw, sb = prof.get("spouse_income_work"), prof.get("spouse_income_business")
+    if sw in (None, "") and sb in (None, ""):
+        return own          # 배우자 소득 미입력 — 합산할 수 없다
+    spouse = int(sw or 0) + int(sb or 0)
+    return spouse if own is None else own + spouse
+
+
+def business_income_total(prof: dict, include_spouse: bool = False) -> int:
+    """사업·기타소득 합계(만원). 0보다 크면 소득 판정을 확정하지 않는다."""
+    total = int(prof.get("income_business") or 0)
+    if include_spouse:
+        total += int(prof.get("spouse_income_business") or 0)
+    return total
 
 
 def income_ratio(prof: dict) -> Optional[float]:

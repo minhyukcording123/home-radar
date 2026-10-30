@@ -372,9 +372,15 @@ def collect(today: date, upp_types: Optional[list[str]] = None,
             per_type[UPP_TYPES[upp]] = got
             time.sleep(POLITE_DELAY)
 
-        # 마감 전 공고만 상세 보강 (호출 수 제한)
+        # 마감 전 공고만 상세 보강 (호출 수 제한).
+        #
+        # 상세(15057999)는 목록과 **별도 활용신청**이다. 목록만 승인된 상태가
+        # 실제로 있으므로(2026-10-30 확인), 상세가 미승인이면 **목록까지 버리지 말고**
+        # 한 번만 경고를 남기고 보강을 포기한다. 예전에는 여기서 LhAuthError 를
+        # 그대로 올려 LH 수집 전체가 0건이 됐다.
         budget = detail_limit
         enriched = 0
+        detail_denied = ""
         for n in out:
             if budget <= 0:
                 break
@@ -383,8 +389,9 @@ def collect(today: date, upp_types: Optional[list[str]] = None,
             try:
                 _fetch_detail(client, key, n)
                 enriched += 1
-            except LhAuthError:
-                raise
+            except LhAuthError as e:
+                detail_denied = str(e)
+                break                      # 나머지 공고도 같은 결과다 — 호출 아낌
             except LhQuotaError as e:
                 warnings.append(f"LH 상세 호출 한도: {e}")
                 break
@@ -392,6 +399,14 @@ def collect(today: date, upp_types: Optional[list[str]] = None,
                 warnings.append(f"LH 상세 실패 {n.uid}: {_scrub(str(e), key)}")
             budget -= 1
             time.sleep(POLITE_DELAY)
+
+        if detail_denied:
+            warnings.append(
+                "[정보] LH 상세(15057999) 미승인 — 목록만 사용한다. "
+                "접수 시작일·당첨 발표일·주소·세대수가 비어 있을 수 있다. "
+                "https://www.data.go.kr/data/15057999/openapi.do 에서 활용신청하면 "
+                "자동으로 채워진다. "
+                f"({detail_denied})")
 
     # 수집 내역을 경고가 아닌 정보로 남긴다 (화면의 note 로 보인다)
     detail = " · ".join(f"{k} {v}건" for k, v in per_type.items() if v)

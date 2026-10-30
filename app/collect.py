@@ -252,9 +252,8 @@ def refresh(today: Optional[date] = None, enrich: bool = True,
     # 공고 수정사항 추적
     revisions = store.track_revisions(rows)
 
-    payload = store.save_notices(rows, warnings, sources=source_results)
-    payload["merged"] = merged
-    payload["corrections"] = corrections
+    payload = store.save_notices(rows, warnings, sources=source_results,
+                                 merged=merged, corrections=corrections)
     payload["new_keys"] = seen_result["new"]
     payload["baselined"] = seen_result["baselined"]
     payload["baseline_sources"] = seen_result["baseline_sources"]

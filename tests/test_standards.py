@@ -232,18 +232,75 @@ class TestJudgeOfficialIncome(unittest.TestCase):
         self.assertEqual(check_of(v, "소득").status, UNMET)
 
     def test_newlywed_happy_house_band(self):
-        """2인 신혼 — 맞벌이 여부를 입력으로 알 수 없어 110~130% 밴드."""
+        """2인 신혼 — 배우자 소득을 모르면 '충족'을 확정하지 않는다.
+
+        행복주택 신혼부부 기준은 **본인+배우자** 소득을 본다. 본인 소득만
+        한도 안이어도 배우자 소득이 더해지면 넘을 수 있으므로 확정하지 않는다.
+        단 **불충족은 확정할 수 있다** — 본인 소득만으로 이미 상한을 넘었다면
+        배우자 소득을 더해도 결론이 안 바뀐다.
+        """
         n = mk("신혼부부 행복주택 입주자 모집")
-        # 645만원 = 6,450,000 ≤ 6,452,897(110%) → 어느 경우든 충족
+        # 645만원 = 6,450,000 ≤ 6,452,897(110%) 이지만 배우자 소득 미입력 → 미확인
         v = judge(n, newlywed_profile(income_work=645), TODAY)
-        self.assertEqual(check_of(v, "소득").status, MET)
-        # 646만원 — 외벌이면 초과, 맞벌이(120%+완화?)면 이내 → 미확인
+        c = check_of(v, "소득")
+        self.assertEqual(c.status, UNKNOWN)
+        self.assertIn("배우자", c.detail + c.todo)
+        # 646만원 — 외벌이면 초과, 맞벌이면 이내 → 역시 미확인
         v = judge(n, newlywed_profile(income_work=646), TODAY)
         self.assertEqual(check_of(v, "소득").status, UNKNOWN)
-        # 763만원 = 7,630,000 > 7,626,151(130%) → 어느 경우든 불충족
+        # 763만원 = 7,630,000 > 7,626,151(130%) → 배우자와 무관하게 불충족
         v = judge(n, newlywed_profile(income_work=763), TODAY)
         self.assertEqual(check_of(v, "소득").status, UNMET)
         self.assertEqual(v.level, "제외")
+
+    def test_spouse_income_resolves_the_band(self):
+        """배우자 소득을 입력하면 밴드가 확정 판정으로 좁혀진다."""
+        n = mk("신혼부부 행복주택 입주자 모집")
+        # 배우자 소득 0 = 외벌이 확정 → 110% 한도(6,452,897)로 판정
+        v = judge(n, newlywed_profile(income_work=645, spouse_income_work=0),
+                  TODAY)
+        self.assertEqual(check_of(v, "소득").status, MET)
+        v = judge(n, newlywed_profile(income_work=646, spouse_income_work=0),
+                  TODAY)
+        self.assertEqual(check_of(v, "소득").status, UNMET)
+
+        # 맞벌이 — 본인 400 + 배우자 300 = 700만원.
+        # 맞벌이 한도(120% + 2인 완화)는 그보다 높아 충족이어야 한다
+        v = judge(n, newlywed_profile(income_work=400, spouse_income_work=300),
+                  TODAY)
+        c = check_of(v, "소득")
+        self.assertEqual(c.status, MET)
+        # 합산값으로 비교했는지 확인
+        self.assertIn("7,000,000", c.detail)
+
+        # 맞벌이인데 합산이 상한을 넘으면 불충족
+        v = judge(n, newlywed_profile(income_work=500, spouse_income_work=400),
+                  TODAY)
+        self.assertEqual(check_of(v, "소득").status, UNMET)
+
+    def test_dual_income_flag_without_amount_stays_unknown(self):
+        """맞벌이 체크만 하고 금액을 안 적으면 확정하지 않는다."""
+        n = mk("신혼부부 행복주택 입주자 모집")
+        v = judge(n, newlywed_profile(income_work=400, dual_income=True), TODAY)
+        self.assertEqual(check_of(v, "소득").status, UNKNOWN)
+
+    def test_spouse_business_income_blocks_confirmation(self):
+        """배우자 사업소득이 있으면 합산으로 적격을 확정하지 않는다."""
+        n = mk("신혼부부 행복주택 입주자 모집")
+        v = judge(n, newlywed_profile(income_work=300,
+                                      spouse_income_business=200), TODAY)
+        c = check_of(v, "소득")
+        self.assertEqual(c.status, UNKNOWN)
+        self.assertIn("사업소득", c.detail + c.todo)
+
+    def test_single_person_standard_ignores_spouse(self):
+        """본인 소득만 보는 기준(청년행복주택)은 배우자 소득을 섞지 않는다."""
+        n = mk("청년 행복주택 입주자 모집")
+        v = judge(n, base_profile(income_work=300, spouse_income_work=900),
+                  TODAY)
+        c = check_of(v, "소득")
+        # 배우자 900만원을 더했다면 불충족이 됐을 것이다
+        self.assertEqual(c.status, MET)
 
     def test_integrated_rental_median_based(self):
         """통합공공임대 1인 — 중위소득 150%(1인 170%) = 4,359,205원."""

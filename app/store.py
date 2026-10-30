@@ -69,12 +69,22 @@ def _write(path: Path, payload) -> None:
 
 # ---------------- 공고 목록 캐시 ----------------
 def save_notices(notices: list[dict], warnings: list[str],
-                 sources: Optional[dict] = None) -> dict:
+                 sources: Optional[dict] = None,
+                 merged: Optional[list] = None,
+                 corrections: Optional[list] = None) -> dict:
+    """수집 결과를 캐시에 쓴다.
+
+    중복 흡수(merged)·정정 연결(corrections) 결과도 함께 남긴다 —
+    예전에는 refresh() 가 반환값에만 담아서, 수집이 끝난 뒤에는
+    "무엇이 왜 합쳐졌는지" 확인할 방법이 없었다.
+    """
     payload = {
         "fetched_at": now_kst().isoformat(timespec="seconds"),
         "count": len(notices),
         "warnings": warnings,
         "sources": sources or {},
+        "merged": merged or [],
+        "corrections": corrections or [],
         "notices": notices,
     }
     _write(NOTICES_FILE, payload)

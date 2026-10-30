@@ -33,9 +33,9 @@ from .checks import (ELIGIBILITY, FILTER, LEVEL_IGNORE, MET, SIGNAL, UNKNOWN,
                      UNMET, Check, Verdict, filter_block, missing)
 from .models import Notice
 from .rules import (ACCOUNT_FIRST_RANK, AGE_RULES, ASSET_GUIDE,
-                    ASSET_GUIDE_SOURCE, RULE_SOURCES, SPECIAL_SUPPLY, fmt_won,
-                    income_base, income_ratio, income_signal, net_assets,
-                    recognized_monthly_income)
+                    ASSET_GUIDE_SOURCE, RULE_SOURCES, SPECIAL_SUPPLY,
+                    business_income_total, fmt_won, income_base, income_ratio,
+                    income_signal, net_assets, recognized_monthly_income)
 
 # 모집이 아닌 후속 안내(결과·서류·계약)는 목록에서 뺀다
 NOISE = re.compile(r"당첨자|서류심사|서류제출|계약\s*(체결|안내|일정)|결과\s*(발표|안내|공고)"
@@ -455,30 +455,59 @@ def _check_income(n: Notice, prof: dict, v: Verdict, today: date,
     std = standards.STANDARDS[std_key]
     src_key = std["source"]
     tier, tier_uncertain = _income_tier(n, std_key)
-    # 맞벌이 여부는 프로필로 알 수 없다 — None 으로 두면 밴드 상한이 열린다
-    dual = None if (spec["dual_pct"] and prof.get("marital") != "미혼") else False
+
+    # 배우자 소득을 합산할지는 기준의 **scope_mode** 로 가른다.
+    #   self        본인만 (청년 매입임대 3순위 등)
+    #   parents_add 본인+부모 (대학생 행복주택) — 부모 소득을 받지 않으므로 미확인
+    #   household   세대 전원 → 배우자가 있으면 합산
+    # 사람이 읽는 scope 문자열을 파싱하면 '세대(단독세대주면 본인)' 처럼
+    # 예외 표기에 걸린다. 기계 판독 필드를 쓴다.
+    scope = str(spec.get("scope") or "")
+    mode = str(spec.get("scope_mode") or "household")
+    has_spouse = prof.get("marital") in ("예비신혼", "신혼", "기혼")
+    with_spouse = mode == "household" and has_spouse
+
+    # 맞벌이 여부 — 프로필에서 확정할 수 있으면 확정한다.
+    # None 이면 외벌이/맞벌이 한도 사이가 '확인 필요'로 남는다.
+    dual = prof_mod.is_dual_income(prof)
+    if not spec["dual_pct"]:
+        dual = False        # 맞벌이 구분이 없는 기준이면 의미가 없다
+
     limit_lo, _, _ = standards.income_limit(std_key, hh, tier=tier)
 
+    sp = prof_mod.spouse_income(prof)
     v.income = {
         "applies": True, "ratio": ratio, "label": std["label"],
         "limit_pct": spec["pct"], "signal": income_signal(ratio, spec["pct"]),
-        "base_manwon": base_manwon,
+        "base_manwon": base_manwon, "scope": scope,
+        "dual_income": dual, "spouse_income": sp,
         "note": (f"{std['label']} 공식 기준 적용 — 가구원 {hh}인 한도 "
-                 f"월 {limit_lo:,}원 ({spec['scope']} 소득 기준)"),
+                 f"월 {limit_lo:,}원 ({scope} 소득 기준)"
+                 + ("" if dual is not None or not spec["dual_pct"]
+                    else " · 맞벌이 여부를 몰라 외벌이~맞벌이 한도 사이는 확인 필요")),
     }
 
-    biz = int(prof.get("income_business") or 0)
-    inc = recognized_monthly_income(prof)          # 만원
+    biz = business_income_total(prof, include_spouse=with_spouse)
+    inc = recognized_monthly_income(prof, include_spouse=with_spouse)   # 만원
     if inc is None:
         v.add(missing("소득", "근로소득·사업소득"))
         return
     inc_won = int(inc) * 10_000
 
+    # 배우자 소득을 합산해야 하는 기준인데 입력이 없으면 '충족'을 확정할 수 없다.
+    # 내가 아는 건 본인 소득뿐이고, 배우자 소득이 더해지면 한도를 넘을 수 있다.
+    #
+    # 다만 **불충족은 확정할 수 있다** — 본인 소득만으로 이미 상한을 넘었다면
+    # 배우자 소득을 더해도 결론이 바뀌지 않는다. 그래서 compare_income 의
+    # 밴드 판정을 그대로 쓰고, '충족'만 '미확인'으로 내린다.
+    spouse_unknown = with_spouse and dual is not False and sp is None
+
     if biz > 0:
         # 사업소득 인정액은 단순 합산과 다르다 — 합산으로 확정하지 않는다
+        whose = "본인·배우자" if (with_spouse and sp) else "본인"
         v.add(Check(
             "소득", UNKNOWN,
-            f"근로+사업 단순 합산 월 {inc_won:,}원 (참고) / "
+            f"{whose} 근로+사업 단순 합산 월 {inc_won:,}원 (참고) / "
             f"{std['label']} 한도 월 {limit_lo:,}원 — 사업소득은 "
             "인정 방식이 달라 합산값으로 판정하지 않는다",
             source_key=src_key,
@@ -490,13 +519,23 @@ def _check_income(n: Notice, prof: dict, v: Verdict, today: date,
         std_key, hh, inc_won, dual=dual, tier=tier,
         tier_uncertain=tier_uncertain)
     status = {"충족": MET, "불충족": UNMET}.get(status_txt, UNKNOWN)
+
+    if spouse_unknown and status == MET:
+        # 본인 소득은 한도 안이지만 배우자 소득을 모른다 → 확정하지 않는다
+        status = UNKNOWN
+        detail = (f"본인 소득 월 {inc_won:,}원은 {std['label']} 한도 "
+                  f"월 {limit_lo:,}원 이내지만, 이 기준은 {scope} 소득을 본다")
+        todo = "내 조건에서 맞벌이 여부와 배우자 소득을 입력하면 판정이 확정된다"
     # official=False 기준은 어차피 미확인으로 내려앉는다 — 그때 detail 에
     # '충족'이라고 적혀 있으면 어긋나 보이므로 참고 표현으로 바꾼다
     official = bool(RULE_SOURCES.get(src_key, {}).get("official"))
     suffix = {MET: " → 충족" if official else " → 기준 이하 (참고)",
               UNMET: " → 불충족" if official else " → 기준 초과 (참고)",
               UNKNOWN: ""}[status]
-    detail = detail.replace("내 소득", "내 근로소득") + suffix
+    # 배우자 소득을 합산했으면 '내 근로소득'이라고 쓰면 안 된다 —
+    # 400만(본인)+300만(배우자)=700만을 "내 근로소득 700만"으로 보여주면 오해다
+    who = "본인·배우자 근로소득" if (with_spouse and sp) else "내 근로소득"
+    detail = detail.replace("내 소득", who) + suffix
     if status != UNKNOWN and not todo:
         todo = "공고문에 별도 소득 기준이 있으면 공고문이 우선한다"
     v.add(Check("소득", status, detail, source_key=src_key, todo=todo))
