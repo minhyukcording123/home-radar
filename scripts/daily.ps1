@@ -1,4 +1,4 @@
-<#
+﻿<#
   HOME RADAR 매일 수집 — Windows 작업 스케줄러용.
 
   등록 (관리자 권한 PowerShell 에서 한 번만):
