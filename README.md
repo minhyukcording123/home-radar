@@ -45,12 +45,72 @@ python -m venv .venv
 
 ### API 키 넣기
 
+키는 **환경변수 → `.env` 파일** 순서로 읽는다. 코드에는 절대 쓰지 않는다.
+
+**방법 1 — `.env` 파일 (권장).** 재부팅해도 남고, 서버 재시작도 필요 없다.
+
 ```powershell
-$env:LH_API_KEY        = "일반 인증키(Decoding)"   # https://www.data.go.kr/data/15058530/openapi.do
-$env:APPLYHOME_API_KEY = "일반 인증키(Decoding)"   # https://www.data.go.kr/data/15098547/openapi.do
+cd C:\minkkk\home-radar
+copy .env.example .env
+notepad .env
 ```
 
+파일 경로: **`C:\minkkk\home-radar\.env`**
+
+```
+LH_API_KEY=여기에_일반인증키_Decoding_붙여넣기
+APPLYHOME_API_KEY=
+```
+
+`.env` 는 `.gitignore` 에 있어 커밋되지 않는다. `.env.example` 만 커밋한다.
+파일 수정시각이 바뀌면 자동으로 다시 읽으므로 **서버를 재시작하지 않아도 된다.**
+
+**방법 2 — 환경변수 (이 세션에서만).**
+
+```powershell
+$env:LH_API_KEY = "일반 인증키(Decoding)"
+```
+
+**확인:**
+
+```powershell
+.\.venv\Scripts\python.exe -m app sources
+```
+
+```
+[O] LH 분양임대공고문  (공식 오픈API)
+     키: 설정됨 (.env) aBcD******== (84자)
+```
+
+출력에는 **마스킹된 값만** 나온다 (앞 4자·뒤 2자·길이). 원문 키는 로그·화면·API
+응답 어디에도 나가지 않는다.
+
+#### Encoding / Decoding 키
+
+포털은 같은 키를 두 가지로 보여준다.
+
+| | 모양 | |
+|---|---|---|
+| 일반 인증키(**Decoding**) | `aBcD1234+/=...` | **이쪽을 권한다** |
+| 일반 인증키(Encoding) | `aBcD1234%2B%2F%3D...` | 넣어도 동작한다 |
+
+HTTP 클라이언트가 쿼리 파라미터를 다시 인코딩하므로, Encoding 키를 그대로 보내면
+`+` → `%2B` → `%252B` 로 **이중 인코딩**되어 인증이 깨진다. HOME RADAR 는 키가
+퍼센트 인코딩돼 있으면 보내기 전에 한 번 풀어서 이 문제를 막는다
+(`app/secrets.py`, 회귀 테스트 `tests/test_secrets.py`).
+
+#### 활용신청 범위
+
+LH 는 **서비스별로 활용신청을 각각** 해야 한다. 하나만 승인됐으면 나머지는
+`SERVICE_ACCESS_DENIED_ERROR` 가 떨어진다.
+
+| 서비스 | 쓰임 |
+|---|---|
+| 15058530 공고 목록 | 공고명·지역·유형·게시일·마감일·원문링크 |
+| 15057999 공고 상세 | 접수시작·마감·당첨발표일·주소·세대수 |
+
 키가 없으면 그 수집원은 **건너뛰고 '키 없음'으로 표시**된다. 조용히 실패하지 않는다.
+호출 한도 초과·미등록 키·승인 안 된 서비스는 각각 다른 안내 문구로 구분된다.
 
 ### 공개 화면 수집과 이용조건
 

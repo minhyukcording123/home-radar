@@ -283,6 +283,8 @@ def source_overview(cfg: Optional[dict] = None) -> list[dict]:
             "enabled": info["enabled"],
             "needs_key": info["needs_key"],
             "has_key": info["has_key"],
+            # 키 상태는 설정 여부·출처·마스킹된 값만 담긴다 (원문 키는 들어가지 않는다)
+            "key": info.get("key") or {},
             "ready": info["ready"],
             "blocked_by": info["blocked_by"],
             "state": st.get("state", "미실행"),

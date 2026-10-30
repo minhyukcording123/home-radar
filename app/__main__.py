@@ -84,8 +84,16 @@ def cmd_sources(args) -> int:
         if s["blocked_by"]:
             print(f"     막힘: {s['blocked_by']}")
         if s["needs_key"]:
-            print(f"     키: {'설정됨' if s['has_key'] else '없음'}"
-                  + (f" · 신청 {s['signup']}" if s.get("signup") else ""))
+            k = s.get("key") or {}
+            if s["has_key"]:
+                # 마스킹된 값만 출력한다 — 원문 키는 절대 찍지 않는다
+                print(f"     키: 설정됨 ({k.get('source')}) {k.get('masked')}")
+                if k.get("looks_url_encoded"):
+                    print("          ↳ Encoding 키로 보인다 — 보낼 때 한 번 풀어서 "
+                          "쓰므로 이중 인코딩 문제는 없다")
+            else:
+                print(f"     키: 없음 — .env 에 {k.get('name')}=<일반 인증키(Decoding)>"
+                      + (f"\n          신청: {s['signup']}" if s.get("signup") else ""))
         if s.get("robots"):
             print(f"     robots: {s['robots']}")
         if s["last_error"]:
