@@ -225,6 +225,12 @@ def _lh_detail(raw: dict) -> dict:
         "supply_available": supply.get("available") or [],
         "supply_missing": supply.get("missing") or [],
         "amount_unit": "원",
+        # 상세 API(15057999)로 받은 서류·계약 일정과 단지 정보
+        "lh_schedule": (raw.get("extra") or {}).get("lh_schedule") or {},
+        "lh_site": (raw.get("extra") or {}).get("lh_site") or {},
+        # 어느 수집원에서 합쳐졌는지 (출처 표시용)
+        "merged_from": (raw.get("extra") or {}).get("merged_from") or [],
+        "detail_loaded": bool(raw.get("detail_loaded")),
         "reason": "" if rows else "이 공고의 공급정보가 제공되지 않습니다",
     }
 
@@ -269,15 +275,23 @@ def api_detail(key: str | None = None,
                             detail="key 또는 house_manage_no+pblanc_no 가 필요합니다")
 
     cache_key = f"청약홈:{house_manage_no}-{pblanc_no}"
+    extra = {}
+    if key:
+        raw = _notice_by_key(key) or {}
+        extra = {
+            "merged_from": (raw.get("extra") or {}).get("merged_from") or [],
+            "source": raw.get("source"),
+            "detail_loaded": bool(raw.get("detail_loaded")),
+        }
     if not refresh:
         cached = store.load_detail(cache_key)
         if cached and not cached.get("error"):
-            return {"cached": True, "available": True, **cached}
+            return {"cached": True, "available": True, **extra, **cached}
     d = applyhome_detail.fetch(house_manage_no, pblanc_no, house_secd)
     if d.get("error"):
         raise HTTPException(status_code=502, detail=d["error"])
     store.save_detail(cache_key, d)
-    return {"cached": False, "available": True, **d}
+    return {"cached": False, "available": True, **extra, **d}
 
 
 @app.get("/api/revisions")

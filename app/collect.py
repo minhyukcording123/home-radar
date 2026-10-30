@@ -117,28 +117,48 @@ def _stale(cached: Optional[dict]) -> bool:
 
 def _enrich_applyhome(notices: list[Notice], today: date, limit: int,
                       warnings: list[str]) -> None:
-    """접수가 안 끝난 청약홈 공고를 마감 가까운 순으로 보강한다."""
+    """청약홈계 공고의 상세(공급금액·공급면적·모집공고문)를 보강한다.
+
+    **중복 제거가 끝난 뒤에 호출한다.** 그래야 한정된 호출 수를 화면에 실제로
+    보이는 공고에 쓴다. 공개 화면 공고와 공식 오픈API 공고가 같은
+    house_manage_no/pblanc_no 를 쓰므로 둘 다 대상이고, 상세 캐시 키도
+    같아서 한 번 받으면 어느 쪽이든 재사용된다.
+
+    공식 오픈API 는 주소·세대수·전화·입주예정월을 주지만 **금액·면적·공고문
+    PDF 는 주지 않는다** — 그건 이 HTML 상세에만 있다.
+    """
     targets = [n for n in notices
-               if n.source_id == "applyhome" and not n.is_closed(today)]
+               if n.source_id in ("applyhome", "applyhome_api")
+               and n.house_manage_no and n.pblanc_no
+               and not n.is_closed(today)]
+    # 마감 가까운 순 — 지금 판단해야 하는 공고에 호출을 먼저 쓴다
     targets.sort(key=lambda x: (x.end or date.max))
-    targets = targets[:limit]
     if not targets:
         return
 
+    called = hits = 0
     with new_client() as client:
         client.get(applyhome_cal.CALENDAR_PAGE)   # 세션 한 번만 달군다
         for n in targets:
-            cached = store.load_detail(n.key)
+            cache_key = f"청약홈:{n.house_manage_no}-{n.pblanc_no}"
+            cached = store.load_detail(cache_key)
             if cached and not cached.get("error") and not _stale(cached):
                 _apply_detail(n, cached)
+                hits += 1
                 continue
+            if called >= limit:
+                continue      # 뒤에 캐시된 공고가 있을 수 있어 break 안 함
             d = applyhome_detail.fetch(
                 n.house_manage_no, n.pblanc_no, n.house_secd, client=client)
+            called += 1
             if d.get("error"):
                 warnings.append(f"[청약홈] {n.title} 상세 실패: {d['error']}")
             else:
-                store.save_detail(n.key, {"schema": DETAIL_SCHEMA, **d})
+                store.save_detail(cache_key, {"schema": DETAIL_SCHEMA, **d})
                 _apply_detail(n, d)
+    if called or hits:
+        warnings.append(f"[정보] 청약홈 상세 보강: 신규 {called}건 · 캐시 {hits}건 "
+                        f"(대상 {len(targets)}건)")
 
 
 def _enrich_lh_supply(notices: list[Notice], limit: int,
@@ -243,15 +263,20 @@ def refresh(today: Optional[date] = None, enrich: bool = True,
             sid, ok=False, skipped=True,
             note=f"{info['blocked_by']} / {reason}" if info["blocked_by"] else reason)
 
-    # 청약홈 상세 보강
-    if enrich:
-        _enrich_applyhome(all_notices, today,
-                          int(ac.get("detail_limit", 40)), warnings)
-        _enrich_lh_supply(all_notices, int(lc.get("supply_limit", 20)), warnings)
-
-    # 중복 제거 → 정정 공고 연결
+    # 중복 제거 → 정정 공고 연결.
+    #
+    # 상세 보강보다 **먼저** 한다. 보강은 호출 수가 제한돼 있으니 중복으로
+    # 사라질 공고에 쓰면 낭비다. 또 merge_into 가 수집원마다 다른 항목을
+    # 합쳐 주므로(공식 API 의 주소·세대수 + 공개 화면의 금액·면적),
+    # 보강 대상은 합쳐진 생존 공고가 된다.
     kept, merged = dedup.dedupe(all_notices)
     corrections = dedup.link_corrections(kept)
+
+    # 상세 보강 — 화면에 보이는(생존한) 공고에만 호출을 쓴다
+    if enrich:
+        _enrich_applyhome(kept, today,
+                          int(ac.get("detail_limit", 40)), warnings)
+        _enrich_lh_supply(kept, int(lc.get("supply_limit", 20)), warnings)
 
     rows = [n.to_dict() for n in kept]
 

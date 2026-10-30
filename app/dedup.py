@@ -99,6 +99,57 @@ def _prefer(a: Notice, b: Notice) -> tuple[Notice, Notice]:
     return (a, b) if _completeness(a) >= _completeness(b) else (b, a)
 
 
+# 병합 대상 필드 — 남는 쪽이 비어 있으면 흡수되는 쪽에서 가져온다
+_MERGE_FIELDS = ("address", "households", "phone", "price", "price_min",
+                 "price_max", "move_in", "doc_url", "url", "posted", "begin",
+                 "end", "announce", "status", "category")
+
+
+def _is_empty(v) -> bool:
+    return v in (None, "", []) or (isinstance(v, (list, dict)) and not v)
+
+
+def merge_into(keep: Notice, drop: Notice) -> list[str]:
+    """흡수되는 공고의 정보를 남는 공고에 **채워 넣는다**.
+
+    왜 필요한가: 수집원마다 주는 항목이 다르다. 청약홈 공식 오픈API 는 주소·
+    세대수·전화·입주예정월을 주지만 **공급금액·공급면적·모집공고문 PDF 는
+    주지 않는다** — 그건 공개 화면 상세를 긁어야 나온다. 신뢰도만 보고
+    공식 API 쪽을 남기고 버리면 금액·면적이 196/200건 사라졌다.
+
+    규칙: **남는 쪽(더 권위 있는 쪽)의 값이 이긴다.** 비어 있는 자리만 채운다.
+    돌려주는 값은 채워 넣은 필드 이름 목록.
+    """
+    filled: list[str] = []
+    for f in _MERGE_FIELDS:
+        if _is_empty(getattr(keep, f, None)) and not _is_empty(getattr(drop, f, None)):
+            setattr(keep, f, getattr(drop, f))
+            filled.append(f)
+
+    if not keep.areas and drop.areas:
+        keep.areas = list(drop.areas)
+        filled.append("areas")
+    if not keep.events and drop.events:
+        keep.events = list(drop.events)
+        filled.append("events")
+
+    # extra 는 키 단위로 합친다 (남는 쪽이 이긴다). 공급정보·일정 보강이 여기 있다
+    for k, val in (drop.extra or {}).items():
+        if k.startswith("_"):
+            continue            # 재조회 코드는 수집원 전용이라 섞지 않는다
+        if _is_empty((keep.extra or {}).get(k)) and not _is_empty(val):
+            keep.extra.setdefault(k, val)
+            filled.append(f"extra.{k}")
+
+    if drop.detail_loaded:
+        keep.detail_loaded = True
+    # 어느 수집원에서 보강됐는지 흔적을 남긴다 (화면의 '출처' 표시용)
+    srcs = set((keep.extra or {}).get("merged_from") or [])
+    srcs.add(drop.source)
+    keep.extra["merged_from"] = sorted(srcs)
+    return filled
+
+
 def _days_apart(x: Optional[date], y: Optional[date]) -> Optional[int]:
     if x is None or y is None:
         return None
@@ -121,9 +172,10 @@ def dedupe(notices: list[Notice]) -> tuple[list[Notice], list[dict]]:
         keep, drop = _prefer(prev, n)
         exact[k] = keep
         drop.dup_of = keep.key
+        filled = merge_into(keep, drop)
         merged.append({"dropped": drop.key, "kept": keep.key,
                        "reason": "같은 수집원 · 제목·지역·접수기간 동일",
-                       "title": drop.title})
+                       "title": drop.title, "merged_fields": filled})
     stage1 = list(exact.values())
 
     # 2) 다른 수집원끼리 제목·지역이 같고 접수시작이 3일 이내
@@ -149,9 +201,11 @@ def dedupe(notices: list[Notice]) -> tuple[list[Notice], list[dict]]:
             keep, drop = _prefer(anchor, other)
             drop.dup_of = keep.key
             dropped_keys.add(drop.key)
+            # 신뢰도 높은 쪽을 남기되 **빈 자리는 흡수되는 쪽에서 채운다**
+            filled = merge_into(keep, drop)
             merged.append({"dropped": drop.key, "kept": keep.key,
                            "reason": f"다른 수집원 중복 ({drop.source} → {keep.source})",
-                           "title": drop.title})
+                           "title": drop.title, "merged_fields": filled})
 
     kept = [n for n in stage1 if n.key not in dropped_keys]
     return kept, merged

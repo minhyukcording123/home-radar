@@ -308,6 +308,8 @@ section{margin-bottom:var(--sp-4)}
 .why .ic.met{color:var(--rec);background:var(--rec-bg)}
 .why .ic.unk{color:var(--chk);background:var(--chk-bg)}
 .why .ic.bad{color:var(--warn);background:var(--warn-bg)}
+/* 순위·가점 정보 — 자격 판정이 아니므로 판정색을 쓰지 않는다 */
+.why .ic.nfo{color:var(--dim);background:var(--card-sub)}
 .why .nm{font-weight:700;margin-right:4px}
 .why .todo{color:var(--accent-ink)}
 .src-note{font-size:11px;color:var(--faint)}
@@ -1047,7 +1049,9 @@ function ddPills(r){
 }
 
 /* 조건 상태 아이콘 — 색 + 기호 + 글자를 함께 쓴다 */
-const ICON = {'충족':['met','✓'], '미확인':['unk','?'], '불충족':['bad','✕']};
+// '정보'는 자격이 아니라 순위·가점 요소 — 판정 아이콘과 구분한다
+const ICON = {'충족':['met','✓'], '미확인':['unk','?'], '불충족':['bad','✕'],
+              '정보':['nfo','·']};
 const LEVEL_META = {
   '추천': ['rec','✓','추천 · 신청 가능성 높음'],
   '확인': ['chk','?','확인 필요'],
@@ -1100,16 +1104,21 @@ function card(r){
     r.address && `<span>${esc(r.address)}</span>`,
   ].filter(Boolean).join('');
 
-  // 왜 이 판정인지 — 불충족 먼저, 그다음 미확인, 충족은 접어 둔다
+  // 왜 이 판정인지 — 불충족 먼저, 그다음 미확인, 충족은 접어 둔다.
+  // info(순위·가점)는 자격이 아니라 등급에 영향이 없으므로 충족과 함께 접는다.
   const primary = [...(v.unmet||[]), ...(v.unknown||[])];
-  const folded = v.met || [];
+  const folded = [...(v.met || []), ...(v.info || [])];
 
-  // 주의사항 1~2줄: 소득 비적용 메모 + 샘플 기준 근거 경고
+  // 주의사항 1~2줄: 소득 비적용 메모 + 미확정 근거 경고
   const cautions = [];
-  if (v.income && v.income.applies === false && v.income.note)
-    cautions.push(esc(v.income.note));
+  if (v.income && v.income.applies === false && v.income.note) {
+    const s = v.income.source;
+    cautions.push(esc(v.income.note)
+      + (s && s.label ? ` <span class="src-note">(${esc(s.label)}${
+          s.asof ? ' · ' + esc(s.asof) : ''})</span>` : ''));
+  }
   if ((v.checks||[]).some(c => c.source && !c.source.official))
-    cautions.push('일부 판정 근거는 <b>샘플 기준</b> — 공고문으로 반드시 확인');
+    cautions.push('일부 판정 근거가 <b>확정되지 않았다</b> — 공고문으로 반드시 확인');
   const cautionHtml = cautions.length
     ? `<div class="caution"><span class="cic" aria-hidden="true">!</span>
         <span>${cautions.slice(0,2).join('<br>')}</span></div>` : '';
@@ -1144,7 +1153,10 @@ function card(r){
         <span class="vtxt">${esc(v.summary)}</span>
       </div>
       ${primary.length ? `<ul class="why">${primary.map(checkLi).join('')}</ul>` : ''}
-      ${folded.length ? `<details class="more"><summary>충족한 조건 ${folded.length}개 보기</summary>
+      ${folded.length ? `<details class="more"><summary>${
+        [(v.met||[]).length ? `충족한 조건 ${(v.met||[]).length}개` : '',
+         (v.info||[]).length ? `순위·가점 정보 ${(v.info||[]).length}개` : '']
+          .filter(Boolean).join(' · ')} 보기</summary>
         <ul class="why">${folded.map(checkLi).join('')}</ul></details>` : ''}
     </div>
     ${cautionHtml}
@@ -1312,6 +1324,27 @@ function detailHTML(r, d, mode, supplyOpen){
   push('당첨자 발표', src.announce || r.announce);
   push('입주 예정', src.move_in || r.move_in);
   push('문의', src.phone || r.phone);
+
+  // 접수 진행 상태 — '마감전(시작일 미상)' 처럼 왜 그런지도 알려 준다
+  if (r.phase){
+    let t = r.phase;
+    if (r.phase === '마감전(시작일 미상)')
+      t += ' · 접수 시작일이 공고 데이터에 없습니다';
+    else if (r.phase === '예정' && r.days_to_begin != null)
+      t += r.days_to_begin === 0 ? ' · 오늘 시작' : ` · 시작 D-${r.days_to_begin}`;
+    push('진행 상태', t);
+  }
+  // LH 상세 API 로 받은 서류·계약 일정
+  for (const [k, val] of Object.entries(src.lh_schedule || {})) push(k, val);
+  // LH 단지 정보 (단지명·전용면적·난방)
+  for (const [k, val] of Object.entries(src.lh_site || {})) push(k, val);
+
+  // 출처와 마지막 갱신 시각 — 어디서 온 값인지 밝힌다
+  const srcNames = [r.source, ...(src.merged_from || [])]
+    .filter((x, i, a) => x && a.indexOf(x) === i);
+  if (srcNames.length) push('출처', srcNames.join(' + '));
+  const stamp = src.cached_at || (VIEW && VIEW.fetched_at);
+  if (stamp) push('마지막 갱신', String(stamp).replace('T', ' ').slice(0, 16));
 
   const supply = (mode === 'ok' && !unavailable) ? supplySection(d, supplyOpen) : '';
 

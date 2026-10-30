@@ -761,30 +761,42 @@ class TestJudge(unittest.TestCase):
         """'일반형'은 '일반공급'과 혼동되기 쉬워 태그로 두지 않았다."""
         self.assertNotIn("일반형", tags_of(mk("민영 APT 일반공급 1순위")))
 
-    def test_unstated_car_limit_does_not_block_recommendation(self):
-        """자동차 기준이 공식 페이지에 없는 유형에서, 통상 기준 이하면 충족.
+    def test_unstated_car_limit_is_never_treated_as_passed(self):
+        """회귀: 자동차 기준을 모르는 유형에 **통상값을 적용해 충족을 주지 않는다.**
 
-        있는지도 확인되지 않은 요건으로 추천을 막으면 과하다. 확인된 공공 유형의
-        자동차 기준이 전부 4,542만원이므로 그 선 아래면 어느 기준이든 통과한다.
-        (거주기간·통장에 쓰는 '확실히 통과하는 임계값'과 같은 방식)
+        한때 "확인된 유형이 모두 4,542만원이니 그 아래면 통과"로 충족을 줬는데,
+        그건 유형 간 기준 전용이다. 우리 데이터 안에 대학생 행복주택의
+        '무차량'(0원) 이라는 더 엄격한 반례가 있어서, 기준을 모르는 유형이
+        4,542만원 이상이라고 단정할 수 없다.
         """
         n = mk("청년안심주택 입주자 모집", region="서울")
         p = dict(household_size=1, income_work=200, assets=5_000, debts=0,
                  residence="서울", residence_since="2015-01")
 
-        v = judge(n, base_profile(car=1_200, **p), TODAY)
-        c = next(c for c in v.checks if c.name == "자동차가액")
-        self.assertEqual(c.status, MET)
-        self.assertIn("4,542만원", c.detail)
-
-        # 통상 기준을 넘으면 확정하지 않는다
-        v = judge(n, base_profile(car=6_000, **p), TODAY)
-        c = next(c for c in v.checks if c.name == "자동차가액")
-        self.assertEqual(c.status, UNKNOWN)
+        for car in (1_200, 6_000):
+            v = judge(n, base_profile(car=car, **p), TODAY)
+            c = next(c for c in v.checks if c.name == "자동차가액")
+            self.assertEqual(c.status, UNKNOWN, f"차량 {car}만원")
+            self.assertTrue(c.todo)
+            # 미확인이 있으면 추천까지 가지 않는다
+            self.assertNotEqual(v.level, "추천")
 
         # 차량이 없으면 검사 자체를 만들지 않는다
         v = judge(n, base_profile(car=0, **p), TODAY)
         self.assertFalse([c for c in v.checks if c.name == "자동차가액"])
+
+    def test_stated_car_limit_is_judged(self):
+        """기준이 공식으로 확인된 유형은 그 값으로 실제 판정한다."""
+        n = mk("국민임대주택 예비입주자 모집", region="서울")
+        p = dict(household_size=1, income_work=200, assets=5_000, debts=0,
+                 residence="서울", residence_since="2015-01")
+        # 국민임대 자동차 기준 4,542만원 (마이홈 확인)
+        v = judge(n, base_profile(car=4_542, **p), TODAY)
+        self.assertEqual(
+            next(c for c in v.checks if c.name == "자동차가액").status, MET)
+        v = judge(n, base_profile(car=4_543, **p), TODAY)
+        self.assertEqual(
+            next(c for c in v.checks if c.name == "자동차가액").status, UNMET)
 
     def test_explicit_no_car_requirement_still_excludes(self):
         """'자동차 미보유'가 명시된 유형(대학생 행복주택)은 그대로 불충족."""
@@ -794,6 +806,70 @@ class TestJudge(unittest.TestCase):
                   TODAY)
         c = next(c for c in v.checks if c.name == "자동차")
         self.assertEqual(c.status, UNMET)
+
+    def test_unranked_requires_whole_household_homeless(self):
+        """회귀: 무순위 신청자격은 '무주택세대구성원'이다.
+
+        청약홈 공식 안내 페이지가 그렇게 규정한다. 본인 무주택만 보고 있어서
+        세대원이 집을 가진 경우까지 추천했다.
+        """
+        n = mk("무순위 잔여세대 공급", category="무순위/잔여", region="서울")
+        p = dict(household_size=2, household="기타")
+
+        # 세대원 중 유주택 → 제외
+        v = judge(n, base_profile(homeless=True, household_homeless=False, **p),
+                  TODAY)
+        self.assertEqual(v.level, "제외")
+        hh = next(c for c in v.checks if c.name == "세대 무주택")
+        self.assertEqual(hh.status, UNMET)
+        self.assertIn("무주택세대구성원", hh.detail)
+
+        # 세대원 전원 무주택 → 통과
+        v = judge(n, base_profile(homeless=True, household_homeless=True, **p),
+                  TODAY)
+        self.assertEqual(
+            next(c for c in v.checks if c.name == "세대 무주택").status, MET)
+
+    def test_unranked_no_income_requirement_cites_official_source(self):
+        """무순위에 소득 요건이 없다는 주장은 공식 출처를 달고 있어야 한다."""
+        n = mk("무순위 잔여세대 공급", category="무순위/잔여", region="서울")
+        v = judge(n, base_profile(household_size=1, income_work=900,
+                                  assets=90_000, car=9_000), TODAY)
+        self.assertFalse(v.income.get("applies"))
+        src = v.income.get("source") or {}
+        self.assertTrue(src.get("official"), "출처가 공식이어야 한다")
+        self.assertIn("applyhome.co.kr", src.get("url", ""))
+        self.assertTrue(src.get("asof"))
+
+    def test_residence_is_ranking_info_not_eligibility(self):
+        """회귀: 거주 요건은 자격이 아니라 순위·가점 요소다.
+
+        자격으로 다루면 확정할 수 없다는 이유로 추천을 막는다 (38건이 그랬다).
+        """
+        n = mk("서울 민영 아파트", category="1순위 2순위", region="서울")
+        p = dict(household_size=1, residence="서울", residence_since="2015-01",
+                 account_opened="2014-03-01", account_payments=100)
+        v = judge(n, base_profile(**p), TODAY)
+
+        res = next(c for c in v.checks if c.name == "거주 지역")
+        self.assertEqual(res.category, "순위정보")
+        # 등급 집계(충족/미확인/불충족)에 들어가지 않는다
+        for bucket in (v.met, v.unknown, v.unmet):
+            self.assertNotIn(res, bucket)
+        self.assertIn(res, v.info)
+        # 순위정보만 미확정이어도 추천을 막지 않는다
+        self.assertEqual(v.level, "추천")
+
+    def test_info_checks_do_not_block_recommendation(self):
+        """INFO 조건은 등급에 영향을 주지 않는다 (단위 수준)."""
+        from app.checks import INFO, NOTE
+        vd = Verdict()
+        vd.add(Check("무주택", MET, "ok", source_key="profile"))
+        vd.add(Check("거주 지역", NOTE, "기타지역", source_key="supply-rule",
+                     category=INFO))
+        self.assertEqual(vd.settle(), "추천")
+        self.assertEqual(len(vd.info), 1)
+        self.assertEqual(len(vd.met), 1)
 
     def test_every_check_has_a_source(self):
         v = judge(mk("서울 공공분양주택", region="서울"), base_profile(), TODAY)

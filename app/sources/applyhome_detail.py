@@ -25,8 +25,17 @@ RECEPT_WORDS = ("특별공급", "일반공급", "1순위", "2순위", "무순위
 
 
 def detail_path(house_secd: str) -> str:
+    """주택구분(HOUSE_SECD) → 상세 화면 경로.
+
+    코드 의미는 2026-10-30 공식 오픈API(15098547) 응답으로 확인했다
+    (HOUSE_SECD / HOUSE_SECD_NM 실측):
+      01 APT · 10 신혼희망타운   → APT 상세      (getAPTLttotPblancDetail 소속)
+      04 무순위 · 06 불법행위 재공급 → 무순위 상세
+      02 도시형/오피스텔/생활숙박/민간임대 · 03 공공지원민간임대 → PRMO 상세
+    09·11 은 실측 표본에 없었지만 종전 분류를 유지한다.
+    """
     s = str(house_secd or "01")
-    if s in ("01", "09"):
+    if s in ("01", "09", "10"):
         return APT_DETAIL
     if s in ("04", "06", "11"):
         return REMNDR_DETAIL

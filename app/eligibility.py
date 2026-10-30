@@ -29,8 +29,9 @@ from typing import Optional
 
 from . import profile as prof_mod
 from . import standards
-from .checks import (ELIGIBILITY, FILTER, LEVEL_IGNORE, MET, SIGNAL, UNKNOWN,
-                     UNMET, Check, Verdict, filter_block, missing)
+from .checks import (ELIGIBILITY, FILTER, INFO, LEVEL_IGNORE, MET, NOTE,
+                     SIGNAL, UNKNOWN, UNMET, Check, Verdict, filter_block,
+                     missing)
 from .models import Notice
 from .rules import (ACCOUNT_FIRST_RANK, AGE_RULES, ASSET_GUIDE,
                     ASSET_GUIDE_SOURCE, RULE_SOURCES, SPECIAL_SUPPLY,
@@ -101,14 +102,24 @@ ACCOUNT_MODES = {"불필요만": ("사용", "가입만"), "가입만까지": ("�
 # 실제 판정, 없으면 '미확인'에 머문다.
 INCOME_SENSITIVE = ("공공분양", "공공임대")
 
-# '어떤 공고 기준이든 통과'로 볼 수 있는 임계값
-RESIDENCE_SAFE_MONTHS = 24     # 해당지역 거주기간 요건은 보통 6~24개월
-ACCOUNT_SAFE_MONTHS = 24       # 수도권 1순위 가입기간
-ACCOUNT_SAFE_PAYMENTS = 24     # 수도권 공공분양 1순위 납입횟수
-# 자동차가액 — 공식 페이지에서 확인한 공공 유형 기준이 전부 4,542만원이다
-# (국민임대·행복주택·통합공공임대·매입임대·특별공급·뉴:홈 일반형).
-# 기준이 적혀 있지 않은 유형은 이 선 아래면 어느 기준이든 통과한다고 본다.
-CAR_SAFE_MANWON = 4_542
+# ---------------------------------------------------------------- 안전 임계값
+#
+# 여기 있는 값은 **그 유형의 공식 기준이 아니라**, "어떤 공고 기준이든 통과한다"고
+# 말할 수 있는 선이다. 그래서 쓸 때 두 가지를 지킨다.
+#
+#   1) 근거가 규정 수준으로 **상한이 정해진 항목**에만 쓴다.
+#      다른 유형들의 값을 평균내거나 일반화해서 만들면 안 된다 —
+#      실제로 자동차가액에서 그렇게 했다가 '무차량' 반례에 걸렸다.
+#   2) 상한을 확인하지 못했으면 출처를 공식으로 표기하지 않는다
+#      (checks.Check 가 official=False 를 자동으로 '미확인'으로 내린다).
+ACCOUNT_SAFE_MONTHS = 24       # 수도권 1순위 가입기간 (ACCOUNT_FIRST_RANK 근거)
+ACCOUNT_SAFE_PAYMENTS = 24     # 수도권 공공분양 1순위 납입횟수 (동일)
+RESIDENCE_SAFE_MONTHS = 24     # 해당지역 거주기간 — 상한을 공식 확인하지 못했다
+
+# 자동차가액 — **통과 기준이 아니라 참고용 통상값**이다.
+# 확인된 15개 유형이 4,542만원이지만 대학생 행복주택은 '무차량'이다.
+# 기준을 모르는 유형에 이 값을 적용해 충족을 주면 안 된다.
+CAR_REFERENCE_MANWON = 4_542
 
 
 def _has(text: str, *words: str) -> bool:
@@ -265,8 +276,12 @@ def _check_homeless(n: Notice, prof: dict, v: Verdict) -> None:
         return
     v.add(Check("무주택", MET, "본인 무주택", source_key="profile"))
 
-    # 공공 유형은 세대원 전원 무주택을 본다
-    if v.kind in ("공공분양", "공공임대"):
+    # 세대원 전원 무주택을 보는 유형.
+    #
+    # 무순위를 뒤늦게 넣었다. 청약홈 공식 페이지(무순위/잔여세대)가 신청자격을
+    # **"무주택세대구성원인 성년자"** 로 규정한다 — 본인만 무주택이면 되는 게
+    # 아니다. 본인 무주택만 보고 있어서 세대원이 집을 가진 경우까지 추천했다.
+    if v.kind in ("공공분양", "공공임대", "무순위"):
         if prof.get("household") == "단독세대주":
             v.add(Check("세대 무주택", MET, "단독세대주 — 세대원 주택 없음",
                         source_key="profile"))
@@ -274,9 +289,13 @@ def _check_homeless(n: Notice, prof: dict, v: Verdict) -> None:
             v.add(Check("세대 무주택", MET, "세대원 전원 무주택",
                         source_key="profile"))
         else:
+            why = ("무순위는 신청자격이 '무주택세대구성원'이다"
+                   if v.kind == "무순위"
+                   else "공공 유형은 세대원 전원 무주택을 본다")
             v.add(Check("세대 무주택", UNMET,
-                        "세대원 중 주택 보유자가 있다 — 공공 유형은 대부분 불가",
-                        source_key="supply-rule"))
+                        f"세대원 중 주택 보유자가 있다 — {why}",
+                        source_key="applyhome-unranked"
+                        if v.kind == "무순위" else "supply-rule"))
 
 
 def _check_account(n: Notice, prof: dict, v: Verdict, today: date) -> None:
@@ -341,37 +360,50 @@ def _check_residence(n: Notice, prof: dict, v: Verdict, today: date) -> None:
         return
     same = bool(n.region) and n.region == prof.get("residence")
     months = prof_mod.residence_months(prof, today)
+    mine = prof.get("residence")
 
-    # 무순위/잔여세대는 거주지역·무주택 요건이 개정을 거치며 여러 번 바뀌었다.
-    # 현재 기준을 코드로 단정할 수 없으므로 '순위가 밀린다' 같은 말을 하지 않고
-    # 공고문 확인으로 넘긴다 (무순위에는 애초에 순위 개념이 없다).
-    if v.kind == "무순위":
-        v.add(Check("거주 요건", UNKNOWN,
-                    f"공고 지역 {n.region or '미상'} · 내 거주지 {prof.get('residence')}"
-                    " — 무순위는 거주지역 요건이 공고별로 다르다",
-                    source_key="notice",
-                    todo="공고문에서 거주지역·무주택 요건 확인"))
+    # 거주 요건은 **자격이 아니라 순위·가점 요소**다.
+    #
+    # 마이홈 국민임대 페이지: 해당지역 거주는 '선정순위 기준'이고 동일순위
+    # 경쟁 시 '연속 거주 기간' 가점(5년 3점·3년 2점·1년 1점)이다.
+    # 수도권 투기과열지구 분양의 2년도 '우선공급' 요건이지 자격요건이 아니다.
+    #
+    # 전에는 이걸 자격 조건으로 다뤄서, 확정할 수 없다는 이유로 공고 38건을
+    # '확인 필요'에 가둬 놨다. 이제 INFO 로 보여만 주고 등급은 건드리지 않는다.
+    # (당첨 가능성에는 영향이 크니 숨기지는 않는다)
+    if months is None and same:
+        v.add(Check("거주 지역", NOTE,
+                    f"{n.region} 거주 — 전입일을 입력하면 거주기간 가점을 "
+                    "가늠할 수 있다",
+                    source_key="supply-rule", category=INFO,
+                    todo="내 조건에서 현 거주지 전입일 입력"))
         return
 
     if not same:
-        v.add(Check("거주 요건", UNKNOWN,
-                    f"공고 지역 {n.region or '미상'} · 내 거주지 {prof.get('residence')}"
-                    " — 기타지역 지원은 순위가 밀릴 수 있다",
-                    source_key="supply-rule",
+        v.add(Check("거주 지역", NOTE,
+                    f"공고 지역 {n.region or '미상'} · 내 거주지 {mine} — "
+                    "해당지역 거주자가 아니라 순위·가점에서 밀릴 수 있다 "
+                    "(자격 자체를 막는 요건은 아니다)",
+                    source_key="supply-rule", category=INFO,
                     todo="공고문의 해당지역/기타지역 배정 물량 확인"))
         return
 
-    if months is None:
-        v.add(missing("거주 요건", "현 거주지 전입일"))
-    elif months >= RESIDENCE_SAFE_MONTHS:
-        v.add(Check("거주 요건", MET,
-                    f"{n.region} 거주 {months}개월 — 거주기간 요건(최대 24개월) 충족",
-                    source_key="supply-rule"))
+    # 해당지역 거주자 — 거주기간을 가점 구간으로 알려 준다
+    if months >= 60:
+        band = "5년 이상 (동일순위 가점 최상위 구간)"
+    elif months >= 36:
+        band = "3년 이상 5년 미만"
+    elif months >= 12:
+        band = "1년 이상 3년 미만"
     else:
-        v.add(Check("거주 요건", UNKNOWN,
-                    f"{n.region} 거주 {months}개월 — 공고별 요건이 6~24개월로 다르다",
-                    source_key="supply-rule",
-                    todo="공고문의 거주기간 요건 확인"))
+        band = "1년 미만 (가점 없음)"
+    extra = ""
+    if v.kind in ("민영분양", "공공분양") and months < 24:
+        extra = " · 수도권 투기과열지구는 2년 이상에 우선공급"
+    v.add(Check("거주 지역", NOTE,
+                f"{n.region} 거주 {months}개월 — {band}{extra}",
+                source_key="supply-rule", category=INFO,
+                todo="공고문의 거주기간·우선공급 기준 확인"))
 
 
 def _applicable_standard(v: Verdict, prof: dict,
@@ -475,10 +507,25 @@ def _check_income(n: Notice, prof: dict, v: Verdict, today: date,
 
     spec = standards.STANDARDS[std_key].get("income") if std_key else None
     if std_key and spec is None:
-        # 민영 일반공급·무순위 — 소득 요건 자체가 없다
-        v.income = {"applies": False, "ratio": ratio,
-                    "note": f"{standards.STANDARDS[std_key]['label']}"
-                            " — 소득 요건 없음"}
+        # 민영 일반공급·무순위 — 소득 요건 자체가 없다.
+        # **왜 없다고 말할 수 있는지**를 출처와 함께 남긴다.
+        # (요건이 없는 것과 요건을 확인하지 못한 것은 다른 얘기다)
+        std = standards.STANDARDS[std_key]
+        src = RULE_SOURCES.get(std["source"], {})
+        v.income = {
+            "applies": False, "ratio": ratio,
+            "note": f"{std['label']} — 자격 요건에 소득이 열거되지 않는다",
+            "source": {"label": src.get("label", std["source"]),
+                        "url": src.get("url", ""), "asof": src.get("asof"),
+                        "official": bool(src.get("official"))},
+        }
+        if not src.get("official"):
+            # 요건 유무를 공식 출처로 확인하지 못했으면 통과로 간주하지 않는다
+            v.add(Check("소득", UNKNOWN,
+                        f"{std['label']}의 소득 요건 유무를 공식 출처로 "
+                        "확인하지 못했다",
+                        source_key=std["source"],
+                        todo="공고문에서 소득 요건을 확인하세요"))
         return
 
     if std_key is None:
@@ -735,26 +782,22 @@ def _check_assets(n: Notice, prof: dict, v: Verdict,
                         f"내 차량 {fmt_won(car)} → {ok_word}",
                         source_key=src_key))
     elif car:
-        # 기준이 공식 페이지에 **적혀 있지 않은** 유형(고령자 행복주택·청년안심주택 등).
+        # 기준이 공식 페이지에 **적혀 있지 않은** 유형
+        # (고령자 행복주택·청년안심주택·영구임대·신혼희망타운·뉴:홈 나눔/선택형 등).
         #
-        # 있는지도 확인되지 않은 요건으로 추천을 막으면 과하다. 거주기간·통장에
-        # 쓰는 것과 같은 방식으로, **우리가 확인한 모든 공공 유형의 자동차 기준이
-        # 4,542만원**이라는 사실을 쓴다 — 그 선 아래면 어느 기준이든 통과한다.
-        # (명시적으로 더 엄격한 '무차량' 요건은 위 car_forbidden 분기가 잡는다.)
-        if car <= CAR_SAFE_MANWON:
-            v.add(Check("자동차가액", MET,
-                        f"내 차량 {fmt_won(car)} — 확인된 모든 공공 유형의 "
-                        f"자동차 기준({fmt_won(CAR_SAFE_MANWON)}) 이하라 "
-                        f"어느 기준이든 통과한다",
-                        source_key="supply-rule",
-                        todo=f"{label}의 자동차 기준은 공고문에서 확인"))
-        else:
-            v.add(Check("자동차가액", UNKNOWN,
-                        f"{label}의 자동차가액 기준이 공식 페이지에 없고 "
-                        f"내 차량 {fmt_won(car)}이 통상 기준"
-                        f"({fmt_won(CAR_SAFE_MANWON)})을 넘는다",
-                        source_key=src_key,
-                        todo="공고문의 자동차가액 기준 확인"))
+        # 한때 "확인된 유형이 모두 4,542만원이니 그 아래면 통과"로 충족을 줬는데,
+        # **그건 유형 간 기준 전용이고 근거가 안 된다.** 우리 데이터 안에
+        # 대학생 행복주택의 '무차량'(= 0원) 이라는 더 엄격한 반례가 있다.
+        # 기준을 모르는 유형이 4,542만원 이상이라고 단정할 수 없다.
+        #
+        # 그래서 '확인 필요'로 둔다. 통상값은 참고로만 알려 준다.
+        v.add(Check("자동차가액", UNKNOWN,
+                    f"{label}의 자동차가액 기준을 공식 출처에서 확인하지 못했다 "
+                    f"(내 차량 {fmt_won(car)}). 다른 공공 유형은 보통 "
+                    f"{fmt_won(CAR_REFERENCE_MANWON)}이지만 "
+                    f"'자동차 미보유'를 요구하는 유형도 있다",
+                    source_key=src_key,
+                    todo="공고문에서 자동차가액 기준을 확인하세요"))
 
 
 def _assets_without_standard(prof: dict, v: Verdict, na, car: int) -> None:

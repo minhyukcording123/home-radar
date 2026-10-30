@@ -602,12 +602,17 @@ STANDARDS: dict[str, dict] = {
         "asset": None,
         "household": "",
     },
+    # 무순위는 2026-10-30 청약홈 공식 안내 페이지로 자격을 확인했다.
+    #   신청자격 "무주택세대구성원인 성년자" · 청약통장 사용여부 X ·
+    #   거주지역은 시·군·구가 정하는 기준(단지별)
+    # 소득·자산은 자격 요건으로 열거되지 않는다 → 검사하지 않는다.
+    # (세대 무주택 요건은 eligibility._check_homeless 가 무순위에도 적용한다)
     "무순위": {
         "label": "무순위·잔여세대",
-        "source": "supply-rule",
+        "source": "applyhome-unranked",
         "income": None,
         "asset": None,
-        "household": "",
+        "household": "무주택세대구성원",
     },
 }
 

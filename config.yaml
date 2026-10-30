@@ -23,7 +23,11 @@ sources:
     # 05 분양주택 · 06 임대주택 · 13 주거복지(매입·전세임대) · 39 신혼희망타운
     upp_types: ["05", "06", "13", "39"]
     max_pages: 5
-    detail_limit: 30
+    # detail_limit / supply_limit 은 **실제 API 호출 수** 상한이다.
+    # 캐시 히트는 소모하지 않으므로 수집을 거듭하면 커버리지가 넓어진다.
+    # 접수 중인 LH 공고가 보통 50건 안쪽이라 60 이면 한 번에 다 덮는다.
+    detail_limit: 60
+    supply_limit: 40
 
   sh:
     enabled: true

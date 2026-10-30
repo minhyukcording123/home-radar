@@ -40,6 +40,19 @@ RULE_SOURCES: dict[str, dict] = {
         "official": True,
         "note": "일반 규정이며 공고별 예외가 있을 수 있다",
     },
+    # 2026-10-30 청약홈(한국부동산원) 무순위/잔여세대 안내 페이지에서 직접 확인했다.
+    # 신청자격 "무주택세대구성원인 성년자" · 청약통장 사용여부 X ·
+    # 거주지역은 시·군·구가 정하는 기준(①전국 ②해당 광역지자체 ③해당 광역권).
+    # 소득·자산은 자격 요건으로 열거되지 않는다.
+    "applyhome-unranked": {
+        "label": "무순위/잔여세대 신청자격 (청약홈)",
+        "url": "https://www.applyhome.co.kr/ar/ara/"
+               "selectSubscrptIntroRemndrHshldView.do",
+        "asof": "2026-10-30 확인",
+        "official": True,
+        "note": "신청자격은 무주택세대구성원인 성년자이고 청약통장은 쓰지 않는다. "
+                "거주지역 요건은 단지별로 붙을 수 있어 공고문을 확인해야 한다",
+    },
     "notice-title": {
         "label": "공고 제목·유형",
         "url": "",

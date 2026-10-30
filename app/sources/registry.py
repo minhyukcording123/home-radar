@@ -96,25 +96,78 @@ SOURCES: list[dict] = [
 BY_ID = {s["id"]: s for s in SOURCES}
 
 
+# 공공데이터포털은 **계정당 인증키가 하나**다. 활용신청만 서비스별로 하고,
+# 승인되면 같은 키로 호출한다. (2026-10-30 실측: LH_API_KEY 로 청약홈
+# 15098547 이 HTTP 200 · totalCount 2,921 을 돌려줬다)
+# 그래서 서비스별 키가 비어 있으면 포털 공통 키로 폴백한다 — 사용자가 같은
+# 키를 여러 변수에 복붙하지 않아도 되게.
+PORTAL_KEY_FALLBACK = ("DATA_GO_KR_API_KEY", "LH_API_KEY", "APPLYHOME_API_KEY")
+
+
+def _portal_source(source_id: str) -> bool:
+    """공공데이터포털에서 발급한 키를 쓰는 수집원인가."""
+    return (BY_ID.get(source_id) or {}).get("access") == OFFICIAL_API
+
+
 def api_key(source_id: str) -> str:
     """수집원에 필요한 API 키. 환경변수 → .env 순서. 없으면 빈 문자열.
 
     돌려주는 값은 **디코딩된 원문**이다. 공공데이터포털의 Encoding 키를 넣어도
     secrets.normalize_api_key 가 한 번 풀어 주므로 이중 인코딩이 생기지 않는다.
+
+    서비스 전용 변수가 비어 있으면 포털 공통 키로 폴백한다. 활용신청이
+    승인되지 않은 서비스는 호출 단계에서 거부되므로, 폴백이 승인 상태를
+    건너뛰게 만들지는 않는다.
     """
     env = (BY_ID.get(source_id) or {}).get("key_env")
     if not env:
         return ""
-    return secrets.normalize_api_key(secrets.get(env))
+    raw = secrets.get(env)
+    if not raw and _portal_source(source_id):
+        for alt in PORTAL_KEY_FALLBACK:
+            if alt == env:
+                continue
+            raw = secrets.get(alt)
+            if raw:
+                break
+    return secrets.normalize_api_key(raw)
+
+
+def key_source(source_id: str) -> str:
+    """키를 어느 환경변수에서 가져왔는지 (화면 안내용). 없으면 빈 문자열."""
+    env = (BY_ID.get(source_id) or {}).get("key_env")
+    if not env:
+        return ""
+    if secrets.get(env):
+        return env
+    if _portal_source(source_id):
+        for alt in PORTAL_KEY_FALLBACK:
+            if alt != env and secrets.get(alt):
+                return alt
+    return ""
 
 
 def key_status(source_id: str) -> dict:
-    """키 설정 여부·출처·마스킹된 값. **원문 키는 담지 않는다.**"""
+    """키 설정 여부·출처·마스킹된 값. **원문 키는 담지 않는다.**
+
+    포털 공통 키로 폴백했으면 어느 변수에서 왔는지 알려 준다 —
+    사용자가 "왜 설정 안 했는데 되지?" 하고 의아해하지 않게.
+    """
     env = (BY_ID.get(source_id) or {}).get("key_env")
     if not env:
         return {"name": None, "set": False, "source": None, "masked": "",
-                "looks_url_encoded": False}
-    return secrets.status(env)
+                "looks_url_encoded": False, "from_env": None, "shared": False}
+    st = dict(secrets.status(env))
+    st["name"] = env
+    used = key_source(source_id)
+    st["from_env"] = used or None
+    st["shared"] = bool(used) and used != env
+    if st["shared"]:
+        # 전용 변수는 비어 있지만 공통 키로 동작한다
+        st["set"] = True
+        st["source"] = secrets.source_of(used)
+        st["masked"] = secrets.mask(secrets.get(used))
+    return st
 
 
 def needs_key(source_id: str) -> bool:

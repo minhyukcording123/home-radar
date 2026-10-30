@@ -30,11 +30,23 @@ from .rules import RULES_VERSION, source_of
 MET = "충족"
 UNKNOWN = "미확인"
 UNMET = "불충족"
+# INFO(순위·가점) 조건이 쓰는 상태. 충족/미확인/불충족 중 하나로 말할 성격이
+# 아니어서 따로 둔다 — 등급 계산에도 들어가지 않는다.
+NOTE = "정보"
 
 # 조건의 성격
-ELIGIBILITY = "자격"    # 공고가 요구하는 자격 요건
+ELIGIBILITY = "자격"    # 공고가 요구하는 자격 요건 — 등급을 정한다
 FILTER = "내설정"        # 내가 걸어둔 관심 지역·유형·분양가 필터
-SIGNAL = "참고"          # 참고 신호 (샘플 기준 등) — 판정을 확정하지 않는다
+SIGNAL = "참고"          # 미확정 기준에서 온 신호 — 판정을 확정하지 않는다
+INFO = "순위정보"        # **자격이 아니라 순위·가점 요소** — 등급에 영향을 주지 않는다
+#
+# INFO 를 따로 둔 이유:
+#   거주기간처럼 '자격 요건이 아니라 순위·가점'인 항목을 자격 조건으로 다루면
+#   확정할 수 없다는 이유로 추천을 막아 버린다. 실제로 거주 요건을 자격으로
+#   취급해 38건이 '확인 필요'에 갇혀 있었다.
+#   (마이홈 국민임대 페이지: 해당지역 거주는 선정순위·가점 요소이고
+#    수도권 투기과열지구 분양의 2년은 '우선공급' 요건이다)
+#   보여는 주되 등급은 바꾸지 않는 자리가 필요하다.
 
 LEVEL_RECOMMEND = "추천"
 LEVEL_CHECK = "확인"
@@ -104,8 +116,10 @@ class Verdict:
         return self
 
     # ---- 조건 모음 조회 ----
+    # 등급 계산·집계는 **자격 조건만** 센다. INFO(순위·가점)는 info 로 따로 본다.
     def by_status(self, status: str) -> list[Check]:
-        return [c for c in self.checks if c.status == status]
+        return [c for c in self.checks
+                if c.status == status and c.category != INFO]
 
     @property
     def unmet(self) -> list[Check]:
@@ -119,21 +133,34 @@ class Verdict:
     def met(self) -> list[Check]:
         return self.by_status(MET)
 
+    @property
+    def info(self) -> list[Check]:
+        """자격이 아닌 순위·가점 정보 — 등급에 영향을 주지 않는다."""
+        return [c for c in self.checks if c.category == INFO]
+
     def settle(self) -> str:
-        """조건 모음에서 최종 등급을 정한다."""
+        """조건 모음에서 최종 등급을 정한다.
+
+        **INFO(순위·가점 요소)는 등급에 영향을 주지 않는다.** 자격 요건이 아닌
+        것을 못 확정했다는 이유로 추천을 막으면 안 된다.
+        """
+        graded = [c for c in self.checks if c.category != INFO]
         if self.level == LEVEL_IGNORE:
             return self.level
         # 1) 내 설정 필터에 걸린 것 먼저 — 자격 문제와 구분해서 보여주기 위해
-        if any(c.status == UNMET and c.category == FILTER for c in self.checks):
+        if any(c.status == UNMET and c.category == FILTER for c in graded):
             self.level = LEVEL_EXCLUDE
         # 2) 공식 기준 불충족
-        elif any(c.status == UNMET and c.official for c in self.checks):
+        elif any(c.status == UNMET and c.official for c in graded):
             self.level = LEVEL_EXCLUDE
         # 3) 미확인이 하나라도 있으면 확정하지 않는다
-        elif self.unknown:
+        elif any(c.status == UNKNOWN for c in graded):
             self.level = LEVEL_CHECK
-        else:
+        elif graded:
             self.level = LEVEL_RECOMMEND
+        else:
+            # 등급을 매길 자격 조건이 하나도 없다 — 확정할 근거가 없다
+            self.level = LEVEL_CHECK
         return self.level
 
     @property
@@ -167,6 +194,8 @@ class Verdict:
             "unmet": [c.to_dict() for c in self.unmet],
             "unknown": [c.to_dict() for c in self.unknown],
             "met": [c.to_dict() for c in self.met],
+            # 자격이 아닌 순위·가점 정보 (등급에 영향 없음)
+            "info": [c.to_dict() for c in self.info],
         }
 
 

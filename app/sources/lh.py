@@ -24,6 +24,7 @@ from urllib.parse import urlparse
 
 import httpx
 
+from .. import store
 from ..models import Notice
 from ..util import new_client, parse_date, to_sido
 from . import registry
@@ -276,31 +277,104 @@ def to_notice(it: dict) -> Notice:
 
 
 def apply_detail(n: Notice, body) -> None:
-    """상세 응답으로 접수시작·마감·발표·주소·세대수를 채운다."""
+    """상세 응답으로 일정·주소·세대수·입주예정월을 채운다.
+
+    **필드명은 2026-10-30 승인 키로 실제 호출해 확인했다** (추정 아님):
+      dsSplScdl — SBSC_ACP_ST_DT 접수시작 · SBSC_ACP_CLSG_DT 접수마감 ·
+                  PZWR_ANC_DT 당첨발표 · ACP_DTTM 접수시간(문자열) ·
+                  PPR_ACP_ST_DT/PPR_ACP_CLSG_DT 서류접수 ·
+                  PPR_SBM_OPE_ANC_DT 서류대상자발표 ·
+                  CTRT_ST_DT/CTRT_ED_DT 계약
+      dsSbd     — LGDN_ADR 소재지 · LGDN_DTL_ADR 상세주소 · HSH_CNT 세대수 ·
+                  LCC_NT_NM 단지명 · DDO_AR 전용면적(범위 문자열) ·
+                  MVIN_XPC_YM 입주예정월
+    날짜는 '2026.11.16' 형태로 온다 (util.parse_date 가 처리한다).
+    """
     scdl = _seg(body, "dsSplScdl")
     sbd = _seg(body, "dsSbd")
-    begins = sorted(d for d in (parse_date(r.get("SBSC_ACP_ST_DT")) for r in scdl) if d)
-    ends = sorted(d for d in (parse_date(r.get("SBSC_ACP_CLSG_DT")) for r in scdl) if d)
-    awards = sorted(d for d in (parse_date(r.get("PZWR_ANC_DT")) for r in scdl) if d)
+
+    def dates(field):
+        return sorted(d for d in (parse_date(r.get(field)) for r in scdl) if d)
+
+    begins, ends = dates("SBSC_ACP_ST_DT"), dates("SBSC_ACP_CLSG_DT")
+    awards = dates("PZWR_ANC_DT")
     if begins:
         n.begin = begins[0]
     if ends:
         n.end = ends[-1]
     if awards:
         n.announce = awards[0]
+
+    # 접수 시간·서류·계약 일정은 화면 상세에서 보여 준다
+    extra_sched = {}
+    acp = next((str(r.get("ACP_DTTM") or "").strip() for r in scdl
+                if str(r.get("ACP_DTTM") or "").strip() not in ("", "~")), "")
+    if acp:
+        extra_sched["접수 시간"] = acp
+    for label, field in (("서류 접수 시작", "PPR_ACP_ST_DT"),
+                         ("서류 접수 마감", "PPR_ACP_CLSG_DT"),
+                         ("서류대상자 발표", "PPR_SBM_OPE_ANC_DT"),
+                         ("계약 시작", "CTRT_ST_DT"),
+                         ("계약 종료", "CTRT_ED_DT")):
+        ds = dates(field)
+        if ds:
+            extra_sched[label] = ds[0].isoformat()
+    if extra_sched:
+        n.extra["lh_schedule"] = extra_sched
+
     if sbd:
-        n.address = str(sbd[0].get("LGDN_ADR", "")).strip()
+        first = sbd[0]
+        # 소재지 + 상세주소를 합친다 (둘이 따로 온다)
+        addr = " ".join(x for x in (str(first.get("LGDN_ADR") or "").strip(),
+                                    str(first.get("LGDN_DTL_ADR") or "").strip())
+                        if x)
+        if addr:
+            n.address = addr
         hh = [str(r.get("HSH_CNT", "")).strip() for r in sbd
               if str(r.get("HSH_CNT", "")).strip()]
         if hh:
             try:
-                n.households = f"{sum(int(h) for h in hh)}세대"
+                n.households = f"{sum(int(h) for h in hh):,}세대"
             except ValueError:
                 n.households = hh[0]
+        mv = str(first.get("MVIN_XPC_YM") or "").strip()
+        if mv:
+            n.move_in = mv
+        # 단지명·전용면적 범위는 상세 화면 요약에 쓴다
+        site = {}
+        for label, field in (("단지명", "LCC_NT_NM"), ("전용면적", "DDO_AR"),
+                             ("난방", "HTN_FMLA_DESC")):
+            val = str(first.get(field) or "").strip()
+            if val:
+                site[label] = val
+        if site:
+            n.extra["lh_site"] = site
+
     n.detail_loaded = True
 
 
-def _fetch_detail(client: httpx.Client, key: str, n: Notice) -> None:
+# 상세 캐시 — 같은 공고를 매 수집마다 다시 부르면 일일 할당량만 태운다.
+# 정규화 형식을 바꾸면 올려서 구버전 캐시를 자연히 무효화한다.
+DETAIL_SCHEMA = 1
+DETAIL_CACHE_PREFIX = "LH상세:"
+
+
+def _fetch_detail(client: httpx.Client, key: str, n: Notice,
+                  use_cache: bool = True) -> bool:
+    """공고 상세를 받아 Notice 에 적용한다. 돌려주는 값은 **API 를 호출했는가**.
+
+    캐시가 있으면 호출하지 않는다 (할당량 절약). 캐시에는 응답 원문을 그대로
+    두고 적용은 매번 apply_detail 로 한다 — 파서를 고치면 캐시가 그대로
+    새 결과를 내도록.
+    """
+    cache_key = DETAIL_CACHE_PREFIX + n.uid
+    if use_cache:
+        cached = store.load_detail(cache_key)
+        if cached and cached.get("schema") == DETAIL_SCHEMA \
+                and cached.get("body") is not None:
+            apply_detail(n, cached["body"])
+            return False
+
     params = {
         "serviceKey": key, "PAN_ID": n.uid,
         "CCR_CNNT_SYS_DS_CD": n.extra.get("_ccr") or "03",
@@ -308,7 +382,10 @@ def _fetch_detail(client: httpx.Client, key: str, n: Notice) -> None:
         "UPP_AIS_TP_CD": n.extra.get("_upp") or "06",
         "AIS_TP_CD": n.extra.get("_ais", ""),
     }
-    apply_detail(n, _request(client, DTL_URL, params, key))
+    body = _request(client, DTL_URL, params, key)
+    store.save_detail(cache_key, {"schema": DETAIL_SCHEMA, "body": body})
+    apply_detail(n, body)
+    return True
 
 
 def collect(today: date, upp_types: Optional[list[str]] = None,
@@ -378,17 +455,21 @@ def collect(today: date, upp_types: Optional[list[str]] = None,
         # 실제로 있으므로(2026-10-30 확인), 상세가 미승인이면 **목록까지 버리지 말고**
         # 한 번만 경고를 남기고 보강을 포기한다. 예전에는 여기서 LhAuthError 를
         # 그대로 올려 LH 수집 전체가 0건이 됐다.
+        # budget 은 **실제 API 호출 수** 상한이다. 캐시 히트는 소모하지 않으므로
+        # 수집을 거듭할수록 커버리지가 넓어진다 (할당량을 아끼면서).
         budget = detail_limit
-        enriched = 0
+        enriched = hits = 0
         detail_denied = ""
         for n in out:
-            if budget <= 0:
-                break
             if n.end is not None and n.end < today:
                 continue
+            cached = store.load_detail(DETAIL_CACHE_PREFIX + n.uid)
+            hit = bool(cached and cached.get("schema") == DETAIL_SCHEMA
+                       and cached.get("body") is not None)
+            if not hit and budget <= 0:
+                continue          # 뒤에 캐시된 공고가 있을 수 있어 break 안 함
             try:
-                _fetch_detail(client, key, n)
-                enriched += 1
+                called = _fetch_detail(client, key, n)
             except LhAuthError as e:
                 detail_denied = str(e)
                 break                      # 나머지 공고도 같은 결과다 — 호출 아낌
@@ -397,8 +478,13 @@ def collect(today: date, upp_types: Optional[list[str]] = None,
                 break
             except Exception as e:  # noqa: BLE001
                 warnings.append(f"LH 상세 실패 {n.uid}: {_scrub(str(e), key)}")
-            budget -= 1
-            time.sleep(POLITE_DELAY)
+                continue
+            if called:
+                enriched += 1
+                budget -= 1
+                time.sleep(POLITE_DELAY)
+            else:
+                hits += 1
 
         if detail_denied:
             warnings.append(
@@ -411,7 +497,11 @@ def collect(today: date, upp_types: Optional[list[str]] = None,
     # 수집 내역을 경고가 아닌 정보로 남긴다 (화면의 note 로 보인다)
     detail = " · ".join(f"{k} {v}건" for k, v in per_type.items() if v)
     if detail:
-        warnings.append(f"[정보] LH 유형별 수집: {detail} / 상세보강 {enriched}건")
+        dated = sum(1 for n in out if n.begin)
+        warnings.append(
+            f"[정보] LH 유형별 수집: {detail} / "
+            f"상세보강 신규 {enriched}건 · 캐시 {hits}건 / "
+            f"접수 시작일 확보 {dated}건")
     missing_link = sum(1 for n in out if not n.url)
     if missing_link:
         warnings.append(f"[정보] LH 공고 중 원문 링크가 없는 건 {missing_link}건")
