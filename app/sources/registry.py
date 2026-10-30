@@ -5,7 +5,7 @@
 """
 from __future__ import annotations
 
-import os
+from .. import secrets
 
 OFFICIAL_API = "공식 오픈API"
 PUBLIC_PAGE = "공개 화면"
@@ -37,14 +37,16 @@ SOURCES: list[dict] = [
     {
         "id": "lh",
         "name": "LH 분양임대공고문",
-        "owner": "공공데이터포털 15058530 / 15057999",
+        "owner": "공공데이터포털 15058530 / 15057999 / 15056765",
         "access": OFFICIAL_API,
         "enabled": True,          # 키가 있으면 자동으로 켜진다
         "key_env": "LH_API_KEY",
-        "covers": "LH 임대주택(국민·행복·통합공공임대), 주거복지(매입·전세임대, 든든전세)",
+        "covers": "LH 임대주택(국민·행복·통합공공임대), 주거복지(매입·전세임대, 든든전세), "
+                  "공고별 공급정보(주택형·면적·세대수·금액)",
         "robots": "해당 없음",
         "note": "2026-10-30 확인: 키 없이 호출하면 401 SERVICE_KEY_IS_NULL. "
-                "서비스별로 활용신청을 각각 해야 한다",
+                "서비스별로 활용신청을 각각 해야 한다 "
+                "(목록 15058530 · 상세 15057999 · 공급정보 15056765)",
         "signup": "https://www.data.go.kr/data/15058530/openapi.do",
     },
     {
@@ -91,11 +93,24 @@ BY_ID = {s["id"]: s for s in SOURCES}
 
 
 def api_key(source_id: str) -> str:
-    """수집원에 필요한 API 키를 환경변수에서 읽는다. 없으면 빈 문자열."""
+    """수집원에 필요한 API 키. 환경변수 → .env 순서. 없으면 빈 문자열.
+
+    돌려주는 값은 **디코딩된 원문**이다. 공공데이터포털의 Encoding 키를 넣어도
+    secrets.normalize_api_key 가 한 번 풀어 주므로 이중 인코딩이 생기지 않는다.
+    """
     env = (BY_ID.get(source_id) or {}).get("key_env")
     if not env:
         return ""
-    return (os.environ.get(env) or "").strip()
+    return secrets.normalize_api_key(secrets.get(env))
+
+
+def key_status(source_id: str) -> dict:
+    """키 설정 여부·출처·마스킹된 값. **원문 키는 담지 않는다.**"""
+    env = (BY_ID.get(source_id) or {}).get("key_env")
+    if not env:
+        return {"name": None, "set": False, "source": None, "masked": "",
+                "looks_url_encoded": False}
+    return secrets.status(env)
 
 
 def needs_key(source_id: str) -> bool:
@@ -107,18 +122,23 @@ def has_key(source_id: str) -> bool:
 
 
 def describe(source_id: str, cfg_enabled: bool | None = None) -> dict:
-    """화면에 보여줄 수집원 설명 + 현재 사용 가능 여부."""
+    """화면에 보여줄 수집원 설명 + 현재 사용 가능 여부.
+
+    키 원문은 담지 않는다 — 설정 여부와 마스킹된 값만 넣는다.
+    """
     s = dict(BY_ID.get(source_id) or {"id": source_id, "name": source_id})
     enabled = s.get("enabled", False) if cfg_enabled is None else cfg_enabled
     s["enabled"] = enabled
     s["needs_key"] = needs_key(source_id)
     s["has_key"] = has_key(source_id)
+    s["key"] = key_status(source_id)        # set/source/masked 만
     if not enabled:
         s["ready"] = False
         s["blocked_by"] = s.get("disabled_reason") or "설정에서 꺼져 있음"
     elif s["needs_key"] and not s["has_key"]:
         s["ready"] = False
-        s["blocked_by"] = f"API 키 없음 ({s.get('key_env')} 환경변수 미설정)"
+        s["blocked_by"] = (f"API 키 없음 — {s.get('key_env')} 를 환경변수나 "
+                           f".env 에 넣어야 한다")
     else:
         s["ready"] = True
         s["blocked_by"] = ""

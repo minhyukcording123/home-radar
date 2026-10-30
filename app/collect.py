@@ -22,7 +22,8 @@ from . import dedup, store
 from .eligibility import judge
 from .models import Area, Event, Notice
 from .rules import RULES_VERSION
-from .sources import applyhome_cal, applyhome_detail, lh, registry, sh, youth
+from .sources import (applyhome_cal, applyhome_detail, lh, lh_supply, registry,
+                      sh, youth)
 from .util import new_client, parse_date, today_kst
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -32,8 +33,8 @@ DEFAULT_CONFIG = {
     "sources": {
         "applyhome": {"enabled": True, "back_months": 1, "ahead_months": 6,
                       "detail_limit": 40},
-        "lh": {"enabled": True, "upp_types": ["06", "13"], "max_pages": 5,
-               "detail_limit": 30},
+        "lh": {"enabled": True, "upp_types": ["05", "06", "13", "39"],
+               "max_pages": 5, "detail_limit": 30, "supply_limit": 20},
         "sh": {"enabled": True, "pages": 3},
         "youth": {"enabled": True, "pages": 2},
         "ish": {"enabled": False, "pages": 2},
@@ -136,6 +137,43 @@ def _enrich_applyhome(notices: list[Notice], today: date, limit: int,
                 _apply_detail(n, d)
 
 
+def _enrich_lh_supply(notices: list[Notice], limit: int,
+                      warnings: list[str]) -> None:
+    """LH 공고에 공급정보(주택형·면적·세대수·금액)를 붙인다.
+
+    LH 공급정보 API 의 금액은 **원** 단위인데 Notice.price_min/max 는 만원이다.
+    그대로 넣으면 화면에 1만 배로 찍히므로 여기서 환산한다.
+    보증금·월임대료는 분양가가 아니라서 price_* 에 넣지 않고
+    extra["supply"] 에 그대로 두어 상세 화면이 따로 보여준다.
+    """
+    if limit <= 0:
+        return
+    try:
+        warnings.extend(lh_supply.enrich_supply(notices, limit=limit))
+    except Exception as e:  # noqa: BLE001 — 보강 실패가 수집을 세우면 안 된다
+        warnings.append(f"[LH] 공급정보 보강 실패: {type(e).__name__}: {e}")
+        return
+
+    for n in notices:
+        supply = (n.extra or {}).get("supply") or {}
+        rows = supply.get("rows") or []
+        if not rows:
+            continue
+        # '분양가'(price)만 금액 범위로 쓴다 — 원 → 만원
+        prices = [r["price"] for r in rows
+                  if isinstance(r.get("price"), (int, float)) and r["price"] > 0]
+        if not prices:
+            continue
+        lo, hi = int(min(prices) // 10_000), int(max(prices) // 10_000)
+        if lo <= 0:
+            continue
+        # 다른 경로(청약홈 상세)가 이미 채웠으면 건드리지 않는다
+        if n.price_min is None:
+            n.price_min = lo
+        if n.price_max is None:
+            n.price_max = hi
+
+
 # ---------------------------------------------------------------- 수집
 def refresh(today: Optional[date] = None, enrich: bool = True,
             only: Optional[list[str]] = None) -> dict:
@@ -201,6 +239,7 @@ def refresh(today: Optional[date] = None, enrich: bool = True,
     if enrich:
         _enrich_applyhome(all_notices, today,
                           int(ac.get("detail_limit", 40)), warnings)
+        _enrich_lh_supply(all_notices, int(lc.get("supply_limit", 20)), warnings)
 
     # 중복 제거 → 정정 공고 연결
     kept, merged = dedup.dedupe(all_notices)

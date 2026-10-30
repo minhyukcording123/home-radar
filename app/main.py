@@ -164,19 +164,92 @@ def api_refresh_status():
 
 
 # ---------------- 공고 상세 ----------------
+def _notice_by_key(key: str) -> dict | None:
+    cached = store.load_notices() or {}
+    for raw in cached.get("notices") or []:
+        if raw.get("key") == key:
+            return raw
+    return None
+
+
+def _lh_detail(raw: dict) -> dict:
+    """LH 공고의 공급정보를 상세 화면이 쓰는 모양으로 맞춘다.
+
+    공급정보 API 의 금액은 **원** 단위다. price_min/max 는 만원이라
+    collect 가 이미 환산해 뒀고, 보증금·월임대료는 분양가가 아니라서
+    supply_rows 에 원 단위 그대로 둔다 — 화면이 라벨을 붙여 보여준다.
+    """
+    supply = (raw.get("extra") or {}).get("supply") or {}
+    rows = supply.get("rows") or []
+    return {
+        "source": raw.get("source"),
+        "available": bool(rows),
+        "location": raw.get("address", ""),
+        "total_units": raw.get("households", ""),
+        "price": raw.get("price", ""),
+        "price_min": raw.get("price_min"),
+        "price_max": raw.get("price_max"),
+        "areas": raw.get("areas") or [],
+        "receptions": [],
+        "doc_url": raw.get("doc_url") or raw.get("url", ""),
+        # LH 고유 — 보증금·월임대료는 원 단위
+        "supply_rows": rows,
+        "supply_available": supply.get("available") or [],
+        "supply_missing": supply.get("missing") or [],
+        "amount_unit": "원",
+        "reason": "" if rows else "이 공고의 공급정보가 제공되지 않습니다",
+    }
+
+
 @app.get("/api/detail")
-def api_detail(house_manage_no: str, pblanc_no: str, house_secd: str = "01",
+def api_detail(key: str | None = None,
+               house_manage_no: str | None = None,
+               pblanc_no: str | None = None,
+               house_secd: str = "01",
                refresh: bool = False):
-    key = f"청약홈:{house_manage_no}-{pblanc_no}"
+    """공고 상세. `key`(= row.key)로 부르면 수집원에 맞는 경로를 골라 준다.
+
+    구버전 호출(house_manage_no + pblanc_no)도 그대로 받는다.
+    """
+    if key:
+        raw = _notice_by_key(key)
+        if raw is None:
+            raise HTTPException(status_code=404, detail="공고를 찾을 수 없습니다")
+        sid = raw.get("source_id")
+        if sid == "lh":
+            return _lh_detail(raw)
+        if sid != "applyhome":
+            # SH·청년안심은 목록만 제공한다 — 상세 API 가 없다
+            return {
+                "source": raw.get("source"),
+                "available": False,
+                "reason": f"{raw.get('source')} 는 공고 목록만 제공합니다 — "
+                          "자세한 내용은 공고문에서 확인하세요",
+                "doc_url": raw.get("doc_url") or raw.get("url", ""),
+                "location": raw.get("address", ""),
+                "total_units": raw.get("households", ""),
+                "areas": [], "receptions": [],
+                "price_min": raw.get("price_min"),
+                "price_max": raw.get("price_max"),
+            }
+        house_manage_no = raw.get("house_manage_no") or house_manage_no
+        pblanc_no = raw.get("pblanc_no") or pblanc_no
+        house_secd = raw.get("house_secd") or house_secd
+
+    if not house_manage_no or not pblanc_no:
+        raise HTTPException(status_code=400,
+                            detail="key 또는 house_manage_no+pblanc_no 가 필요합니다")
+
+    cache_key = f"청약홈:{house_manage_no}-{pblanc_no}"
     if not refresh:
-        cached = store.load_detail(key)
+        cached = store.load_detail(cache_key)
         if cached and not cached.get("error"):
-            return {"cached": True, **cached}
+            return {"cached": True, "available": True, **cached}
     d = applyhome_detail.fetch(house_manage_no, pblanc_no, house_secd)
     if d.get("error"):
         raise HTTPException(status_code=502, detail=d["error"])
-    store.save_detail(key, d)
-    return {"cached": False, **d}
+    store.save_detail(cache_key, d)
+    return {"cached": False, "available": True, **d}
 
 
 @app.get("/api/revisions")
