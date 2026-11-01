@@ -1,41 +1,48 @@
-"""영속 저장소 — Supabase(PostgREST) 에 암호화된 키-값 레코드를 둔다.
+"""영속 저장소 — **GitHub 비공개 저장소**에 암호화된 작은 파일을 둔다.
 
-왜 이게 필요한가
-----------------
+왜 이걸 고르나
+--------------
 Render 무료 플랜은 영구 디스크가 없다. 재시작·슬립 해제·재배포마다 `data/` 와
-`profile.json` 이 사라진다. 내 조건은 `PROFILE_JSON` 환경변수로 손수 복원할 수
-있었지만 **즐겨찾기는 복구 수단이 아예 없었고**, PC 와 아이폰이 같은 값을
-보지도 못했다. 그래서 바깥에 작은 저장소를 하나 둔다.
+`profile.json` 이 사라진다. 내 조건은 환경변수로 손수 복원할 수 있었지만
+**즐겨찾기는 복구 수단이 아예 없었고**, PC 와 아이폰이 같은 값을 보지도 못했다.
 
-왜 드라이버를 안 쓰나
----------------------
-Supabase 는 PostgREST 로 **HTTP** 접근을 제공한다. 이미 쓰고 있는 httpx 로
-충분해서 `psycopg`/`sqlalchemy` 같은 네이티브 의존성을 추가하지 않는다.
-무료 인스턴스의 빌드 시간과 메모리를 아끼는 쪽이 낫다.
+저장할 것은 **암호화 후 약 1.3KB**, 쓰기는 주 몇 회다. 이 정도에 전용 DB 를
+붙이면 계정·무료플랜 정책·휴면 규칙을 하나 더 떠안게 된다. 그래서 이미 가지고
+있는 GitHub 를 쓴다.
+
+  · 새 계정도, 새 무료 플랜도 필요 없다
+  · 휴면·일시중지가 없다 (Supabase 무료는 7일, 다른 곳은 정책이 불명확하다)
+  · **커밋 이력이 곧 백업이다** — 되돌리기가 공짜로 따라온다
+  · Contents API 는 공식 문서가 있는 REST 라 httpx 만으로 충분하다 (새 의존성 0)
+
+**코드 저장소와는 다른 저장소를 쓴다.** Render 가 지켜보는 저장소에 쓰면
+저장할 때마다 재배포가 걸린다. 별도 저장소면 그 위험이 아예 없다.
 
 무엇을 저장하나
 ---------------
-단일 사용자 앱이라 표를 여러 개 만들지 않는다. 키-값 한 장이면 된다.
+단일 사용자 앱이라 복잡한 구조를 두지 않는다. 키 하나가 파일 하나다.
 
-    home_radar_kv(k text primary key, v text, key_fp text, updated_at timestamptz)
+    data/profile.json     내 조건 (생년·소득·자산 …)   ← 암호화
+    data/bookmarks.json   즐겨찾기 key 목록            ← 암호화
 
-    k = "profile"    내 조건 (생년·소득·자산 …)   ← 암호화해서 넣는다
-    k = "bookmarks"  즐겨찾기 key 목록            ← 암호화해서 넣는다
-    k = "settings"   화면 설정                    ← 암호화해서 넣는다
+파일 안은 이런 봉투다 (암호문 자체는 `data` 안에 들어 있다):
 
-공고 캐시는 **여기 두지 않는다.** 공개 정보라 암호화할 이유가 없고, 수백 건이라
-무료 DB 용량과 요청 수를 잡아먹는다. 캐시는 지금처럼 로컬 파일에 두고
-없으면 다시 수집한다.
+    {"v": 1, "key_fp": "<키 지문>", "data": "<Fernet 토큰>"}
+
+공고 캐시는 **여기 두지 않는다.** 공개 정보라 암호화할 이유가 없고 수백 건이라
+저장소를 지저분하게 만든다. 캐시는 로컬 파일에 두고 없으면 다시 수집한다.
 
 보안
 ----
-- 값은 `app/crypto.py` 로 **앱에서 암호화**한 뒤 올린다. DB 는 의미를 모른다.
-- 접근키는 Render 환경변수에만 둔다. **service_role 키를 화면으로 내보내지 않는다**
-  — 이 모듈은 서버에서만 import 되고, 어떤 API 응답에도 키가 담기지 않는다.
+- 값은 `app/crypto.py`(Fernet)로 **앱에서 암호화**한 뒤 올린다. GitHub 는 내용을 모른다.
+- 토큰은 Render 환경변수에만 둔다. 어떤 API 응답·화면·로그에도 담기지 않는다.
+- 토큰은 **그 저장소 하나에만** 권한을 주는 fine-grained PAT 를 쓴다.
 - 실패를 **조용히 삼키지 않는다.** 저장이 안 됐는데 성공이라고 말하지 않는다.
 """
 from __future__ import annotations
 
+import base64
+import json
 import threading
 import time
 from typing import Any, Optional
@@ -45,8 +52,10 @@ import httpx
 from . import crypto
 from . import secrets as appsecrets
 
-TABLE = "home_radar_kv"
-TIMEOUT = 8.0          # 무료 DB 가 느릴 때 화면이 통째로 멎지 않게 짧게 끊는다
+API = "https://api.github.com"
+PATH_PREFIX = "data"
+TIMEOUT = 10.0
+ENVELOPE_VERSION = 1
 _lock = threading.Lock()
 
 
@@ -55,59 +64,65 @@ class RemoteError(Exception):
 
 
 # ---------------------------------------------------------------- 설정
-def base_url() -> str:
-    """https://<project>.supabase.co 형태."""
-    return appsecrets.get("SUPABASE_URL").rstrip("/")
+def repo() -> str:
+    """`owner/repo` 형태. 코드 저장소가 **아닌** 데이터 전용 저장소."""
+    return appsecrets.get("GITHUB_REPO").strip().strip("/")
 
 
-def api_key() -> str:
-    """service_role 키 (서버 전용). 절대 화면으로 내보내지 않는다."""
-    return appsecrets.get("SUPABASE_KEY")
+def token() -> str:
+    """fine-grained PAT (Contents: read and write). 서버에서만 쓴다."""
+    return appsecrets.get("GITHUB_TOKEN")
+
+
+def branch() -> str:
+    return appsecrets.get("GITHUB_BRANCH") or "main"
 
 
 def enabled() -> bool:
     """원격 저장소를 쓸 수 있는 상태인가."""
-    return bool(base_url() and api_key())
+    return bool(repo() and token())
 
 
 def status() -> dict:
     """설정 상태 — **비밀값은 담지 않는다** (화면에 보여줘도 되는 것만)."""
     return {
+        "backend": "github",
         "enabled": enabled(),
         "encrypted": crypto.key_configured(),
-        "url_set": bool(base_url()),
-        "key_set": bool(api_key()),
+        "repo": repo(),            # 저장소 이름은 비밀이 아니다
+        "branch": branch(),
+        "token_set": bool(token()),
         "key_fingerprint": crypto.fingerprint(),
     }
 
 
 def _headers() -> dict:
-    k = api_key()
-    # HTTP 헤더는 ASCII 만 담을 수 있다. 키를 잘못 붙여 넣어 한글·공백이 섞이면
-    # httpx 안쪽에서 UnicodeEncodeError 로 터지는데, 그 메시지로는 원인을 알 수
-    # 없다. 여기서 먼저 잡아 무엇이 잘못됐는지 말해 준다. (키 값은 안 보여준다.)
+    t = token()
+    # HTTP 헤더는 ASCII 만 담을 수 있다. 토큰을 잘못 붙여 넣어 한글·줄바꿈이
+    # 섞이면 httpx 안쪽에서 터지는데 그 메시지로는 원인을 알 수 없다.
     try:
-        k.encode("ascii")
+        t.encode("ascii")
     except UnicodeEncodeError:
         raise RemoteError(
-            "SUPABASE_KEY 에 ASCII 가 아닌 문자가 들어 있습니다 — "
+            "GITHUB_TOKEN 에 ASCII 가 아닌 문자가 들어 있습니다 — "
             "복사할 때 다른 문자가 섞였는지 확인하세요") from None
     return {
-        "apikey": k,
-        "Authorization": f"Bearer {k}",
-        "Content-Type": "application/json",
-        "Accept": "application/json",
+        "Authorization": f"Bearer {t}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+        "User-Agent": "home-radar",
     }
 
 
-def _url() -> str:
-    return f"{base_url()}/rest/v1/{TABLE}"
+def _url(key: str) -> str:
+    return f"{API}/repos/{repo()}/contents/{PATH_PREFIX}/{key}.json"
 
 
 # ---------------------------------------------------------------- 캐시
-# 단일 사용자라 메모리 캐시 하나면 충분하다. 화면을 열 때마다 DB 를 때리면
+# 단일 사용자라 메모리 캐시 하나면 충분하다. 화면을 열 때마다 네트워크를 타면
 # 무료 인스턴스에서 첫 응답이 눈에 띄게 느려진다.
-_cache: dict[str, tuple[float, Any]] = {}
+# sha 도 같이 들고 있어야 덮어쓸 때 한 번 더 조회하지 않는다.
+_cache: dict[str, tuple[float, Any, Optional[str]]] = {}
 CACHE_TTL = 30.0
 
 
@@ -119,16 +134,63 @@ def invalidate(key: Optional[str] = None) -> None:
             _cache.pop(key, None)
 
 
-def _cached(key: str):
-    hit = _cache.get(key)
-    if hit and (time.monotonic() - hit[0]) < CACHE_TTL:
-        return True, hit[1]
-    return False, None
-
-
-def _remember(key: str, value) -> None:
+def _remember(key: str, value, sha: Optional[str]) -> None:
     with _lock:
-        _cache[key] = (time.monotonic(), value)
+        _cache[key] = (time.monotonic(), value, sha)
+
+
+def _cached_sha(key: str) -> Optional[str]:
+    hit = _cache.get(key)
+    return hit[2] if hit else None
+
+
+# ---------------------------------------------------------------- 저수준
+def _request(method: str, url: str, **kw) -> httpx.Response:
+    try:
+        return httpx.request(method, url, headers=_headers(),
+                             timeout=TIMEOUT, **kw)
+    except httpx.HTTPError as e:
+        raise RemoteError(f"원격 저장소 접속 실패: {type(e).__name__}") from e
+
+
+def _explain(r: httpx.Response) -> str:
+    """GitHub 오류를 사람이 읽을 수 있게. **토큰은 절대 담지 않는다.**"""
+    try:
+        msg = (r.json() or {}).get("message", "")[:160]
+    except ValueError:
+        msg = (r.text or "")[:160]
+    if r.status_code == 401:
+        return "인증 거부(401) — GITHUB_TOKEN 이 틀렸거나 만료됐습니다"
+    if r.status_code == 403:
+        if "rate limit" in msg.lower():
+            return "요청 한도 초과(403) — 잠시 뒤 다시 시도하세요"
+        return ("권한 없음(403) — 토큰에 이 저장소의 "
+                "Contents: Read and write 권한이 있는지 확인하세요")
+    if r.status_code == 404:
+        return (f"저장소나 경로를 찾을 수 없습니다(404) — GITHUB_REPO='{repo()}' "
+                f"브랜치='{branch()}' 가 맞는지, 토큰이 그 저장소에 접근할 수 "
+                "있는지 확인하세요")
+    if r.status_code == 409:
+        return "충돌(409) — 다른 곳에서 먼저 저장했습니다. 다시 시도하세요"
+    if r.status_code == 422:
+        return f"요청이 거부됐습니다(422): {msg}"
+    return f"원격 저장소 오류({r.status_code}): {msg}"
+
+
+def _fetch(key: str) -> tuple[Optional[str], Optional[str]]:
+    """(봉투 문자열, sha). 파일이 없으면 (None, None)."""
+    r = _request("GET", _url(key), params={"ref": branch()})
+    if r.status_code == 404:
+        return None, None
+    if r.status_code >= 400:
+        raise RemoteError(_explain(r))
+    body = r.json()
+    raw = body.get("content") or ""
+    try:
+        text = base64.b64decode(raw).decode("utf-8")
+    except (ValueError, UnicodeDecodeError) as e:
+        raise RemoteError(f"'{key}' 내용을 읽을 수 없습니다: {e}") from e
+    return text, body.get("sha")
 
 
 # ---------------------------------------------------------------- 읽기/쓰기
@@ -141,27 +203,23 @@ def get(key: str, *, use_cache: bool = True) -> Optional[Any]:
     if not enabled():
         return None
     if use_cache:
-        ok, val = _cached(key)
-        if ok:
-            return val
+        hit = _cache.get(key)
+        if hit and (time.monotonic() - hit[0]) < CACHE_TTL:
+            return hit[1]
 
-    try:
-        r = httpx.get(_url(), headers=_headers(), timeout=TIMEOUT,
-                      params={"k": f"eq.{key}", "select": "v,key_fp", "limit": 1})
-    except httpx.HTTPError as e:
-        raise RemoteError(f"원격 저장소 접속 실패: {type(e).__name__}") from e
-    if r.status_code >= 400:
-        raise RemoteError(_explain(r))
-
-    rows = r.json() or []
-    if not rows:
-        _remember(key, None)
+    text, sha = _fetch(key)
+    if text is None:
+        _remember(key, None, None)
         return None
 
-    row = rows[0]
-    blob, fp = row.get("v"), row.get("key_fp") or ""
-    if blob in (None, ""):
-        _remember(key, None)
+    try:
+        env = json.loads(text)
+    except json.JSONDecodeError as e:
+        raise RemoteError(f"'{key}' 형식이 올바르지 않습니다: {e}") from e
+
+    blob, fp = env.get("data"), env.get("key_fp") or ""
+    if not blob:
+        _remember(key, None, sha)
         return None
 
     try:
@@ -176,7 +234,7 @@ def get(key: str, *, use_cache: bool = True) -> Optional[Any]:
                 "지금 저장하면 예전 내용을 덮어쓰게 되니 주의하세요.") from e
         raise RemoteError(f"'{key}' 복호화 실패: {e}") from e
 
-    _remember(key, value)
+    _remember(key, value, sha)
     return value
 
 
@@ -188,22 +246,31 @@ def put(key: str, value: Any) -> dict:
     """
     if not enabled():
         raise RemoteError("원격 저장소가 설정되지 않았습니다 "
-                          "(SUPABASE_URL / SUPABASE_KEY)")
+                          "(GITHUB_REPO / GITHUB_TOKEN)")
     if not crypto.key_configured():
         raise RemoteError("ENCRYPTION_KEY 가 없어 개인정보를 외부에 "
                           "저장하지 않습니다")
 
-    payload = {"k": key, "v": crypto.encrypt_json(value),
-               "key_fp": crypto.fingerprint()}
-    try:
-        r = httpx.post(
-            _url(), headers={**_headers(),
-                             # 같은 k 가 있으면 갱신 (upsert)
-                             "Prefer": "resolution=merge-duplicates,return=minimal"},
-            params={"on_conflict": "k"}, json=payload, timeout=TIMEOUT)
-    except httpx.HTTPError as e:
-        raise RemoteError(f"원격 저장소 쓰기 실패: {type(e).__name__}") from e
-    if r.status_code >= 400:
+    envelope = json.dumps({
+        "v": ENVELOPE_VERSION,
+        "key_fp": crypto.fingerprint(),
+        "data": crypto.encrypt_json(value),
+    }, ensure_ascii=False, indent=2)
+    content = base64.b64encode(envelope.encode("utf-8")).decode("ascii")
+
+    sha = _cached_sha(key)
+    for attempt in (1, 2):
+        payload = {"message": f"chore: {key} 갱신", "content": content,
+                   "branch": branch()}
+        if sha:
+            payload["sha"] = sha      # 기존 파일을 덮어쓸 때만 필요하다
+        r = _request("PUT", _url(key), json=payload)
+        if r.status_code < 400:
+            break
+        # sha 가 낡았다 — 다른 곳에서 먼저 저장했다. 한 번만 다시 읽어 재시도.
+        if r.status_code in (409, 422) and attempt == 1:
+            _, sha = _fetch(key)
+            continue
         raise RemoteError(_explain(r))
 
     invalidate(key)
@@ -216,14 +283,20 @@ def put(key: str, value: Any) -> dict:
 
 
 def delete(key: str) -> dict:
-    """레코드를 지운다 (내 조건 초기화)."""
+    """레코드를 지운다 (내 조건 초기화).
+
+    커밋 이력에는 예전 **암호문**이 남는다. 열쇠가 없으면 읽을 수 없지만,
+    완전히 없애려면 저장소 자체를 지우면 된다 — HANDOFF 에 적어 뒀다.
+    """
     if not enabled():
         raise RemoteError("원격 저장소가 설정되지 않았습니다")
-    try:
-        r = httpx.delete(_url(), headers=_headers(), timeout=TIMEOUT,
-                         params={"k": f"eq.{key}"})
-    except httpx.HTTPError as e:
-        raise RemoteError(f"원격 저장소 삭제 실패: {type(e).__name__}") from e
+    _, sha = _fetch(key)
+    if sha is None:
+        invalidate(key)
+        return {"deleted": False, "key": key, "reason": "저장된 값이 없습니다"}
+    r = _request("DELETE", _url(key),
+                 json={"message": f"chore: {key} 삭제", "sha": sha,
+                       "branch": branch()})
     if r.status_code >= 400:
         raise RemoteError(_explain(r))
     invalidate(key)
@@ -231,60 +304,77 @@ def delete(key: str) -> dict:
 
 
 def ping() -> dict:
-    """연결 확인 — 표가 만들어졌는지, 키가 맞는지 본다.
-
-    시간당 크론이 이걸 한 번씩 불러 **무료 DB 가 휴면에 들어가지 않게** 한다
-    (Supabase 무료 프로젝트는 일정 기간 활동이 없으면 일시중지된다).
-    """
+    """연결 확인 — 저장소에 닿는지, 토큰 권한이 맞는지 본다."""
     if not enabled():
         return {"ok": False, "reason": "미설정"}
     try:
-        r = httpx.get(_url(), headers=_headers(), timeout=TIMEOUT,
-                      params={"select": "k", "limit": 1})
-    except httpx.HTTPError as e:
-        return {"ok": False, "reason": f"{type(e).__name__}"}
+        r = _request("GET", f"{API}/repos/{repo()}")
+    except RemoteError as e:
+        return {"ok": False, "reason": str(e)}
     if r.status_code >= 400:
         return {"ok": False, "reason": _explain(r)}
-    return {"ok": True, "rows": len(r.json() or [])}
+    body = r.json()
+    return {"ok": True, "private": bool(body.get("private")),
+            "default_branch": body.get("default_branch")}
 
 
-def _explain(r: httpx.Response) -> str:
-    """PostgREST 오류를 사람이 읽을 수 있게. **키는 절대 담지 않는다.**"""
-    try:
-        body = r.json()
-        msg = body.get("message") or body.get("hint") or str(body)[:160]
-    except ValueError:
-        msg = (r.text or "")[:160]
-    if r.status_code in (401, 403):
-        return f"인증 거부({r.status_code}) — SUPABASE_KEY 를 확인하세요"
-    if r.status_code == 404 and TABLE in msg:
-        return (f"표 '{TABLE}' 가 없습니다 — Supabase SQL 편집기에서 "
-                "생성 SQL을 먼저 실행하세요")
-    return f"원격 저장소 오류({r.status_code}): {msg}"
+def history(key: str, limit: int = 10) -> list[dict]:
+    """이 레코드의 변경 이력 — **커밋 이력이 곧 백업이다.**
+
+    되돌리려면 해당 커밋의 파일을 받아 복호화해 다시 저장하면 된다.
+    (scripts/restore.py 참고)
+    """
+    if not enabled():
+        return []
+    r = _request("GET", f"{API}/repos/{repo()}/commits",
+                 params={"path": f"{PATH_PREFIX}/{key}.json",
+                         "sha": branch(), "per_page": limit})
+    if r.status_code >= 400:
+        raise RemoteError(_explain(r))
+    return [{"sha": c.get("sha", "")[:7],
+             "at": (c.get("commit") or {}).get("committer", {}).get("date"),
+             "message": (c.get("commit") or {}).get("message", "")}
+            for c in (r.json() or [])]
 
 
-# 표 생성 SQL — 사용자가 Supabase SQL 편집기에 붙여 넣는다.
-# 코드에 담아 두면 HANDOFF 와 실제 스키마가 어긋나지 않는다.
-CREATE_TABLE_SQL = f"""
--- HOME RADAR 영속 저장소 (단일 사용자)
-create table if not exists public.{TABLE} (
-  k          text primary key,
-  v          text not null,            -- 앱에서 암호화한 값 (평문 아님)
-  key_fp     text,                     -- 암호화 키 지문 (키 교체 감지용)
-  updated_at timestamptz not null default now()
-);
+def get_at(key: str, sha: str) -> Optional[Any]:
+    """특정 커밋 시점의 값을 복호화해 돌려준다 (복구용, 쓰기는 하지 않는다)."""
+    if not enabled():
+        return None
+    r = _request("GET", _url(key), params={"ref": sha})
+    if r.status_code == 404:
+        return None
+    if r.status_code >= 400:
+        raise RemoteError(_explain(r))
+    text = base64.b64decode((r.json() or {}).get("content") or "").decode("utf-8")
+    env = json.loads(text)
+    return crypto.decrypt_json(env["data"])
 
--- 갱신 시각 자동 기록
-create or replace function public.home_radar_touch()
-returns trigger language plpgsql as $$
-begin new.updated_at = now(); return new; end $$;
 
-drop trigger if exists home_radar_kv_touch on public.{TABLE};
-create trigger home_radar_kv_touch before update on public.{TABLE}
-  for each row execute function public.home_radar_touch();
+# 사용자가 따라 할 설정 안내. 코드에 담아 두면 문서와 실제가 어긋나지 않는다.
+SETUP_GUIDE = """\
+HOME RADAR 영속 저장소 설정 (GitHub 비공개 저장소)
 
--- 행 수준 보안을 켜고 정책을 두지 않는다.
--- anon/authenticated 키로는 한 줄도 읽거나 쓸 수 없고,
--- 서버가 쓰는 service_role 키만 RLS 를 통과한다.
-alter table public.{TABLE} enable row level security;
-""".strip()
+1) 데이터 전용 저장소를 만든다 — 코드 저장소와 **다른** 저장소여야 한다.
+   github.com → New repository
+     이름        home-radar-data   (아무 이름이나 가능)
+     공개 범위   Private           ← 반드시 비공개
+     초기화      'Add a README file' 체크   ← main 브랜치가 생겨야 한다
+
+2) 토큰을 만든다 (그 저장소 하나에만 권한을 준다).
+   github.com → Settings → Developer settings
+     → Personal access tokens → Fine-grained tokens → Generate new token
+     Repository access   Only select repositories → home-radar-data
+     Permissions         Repository permissions → Contents → Read and write
+     Expiration          원하는 기간 (만료되면 다시 만들어 교체한다)
+
+3) Render → 서비스 → Environment 에 3개를 넣는다.
+     GITHUB_REPO     <사용자명>/home-radar-data
+     GITHUB_TOKEN    위에서 만든 토큰 (github_pat_... )
+     ENCRYPTION_KEY  아래 명령으로 만든 값 — 분실하면 복구 불가, 따로 보관할 것
+                     python -c "import secrets; print(secrets.token_urlsafe(32))"
+
+4) 저장되면 data/profile.json · data/bookmarks.json 이 그 저장소에 생긴다.
+   내용은 암호화돼 있어 GitHub 에서 열어도 읽을 수 없다.
+   커밋 이력이 곧 백업이다.
+"""

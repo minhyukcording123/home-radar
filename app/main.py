@@ -483,8 +483,50 @@ def api_storage():
     st = remote_store.status()
     st["ping"] = remote_store.ping() if st["enabled"] else {"ok": False,
                                                             "reason": "미설정"}
-    st["table_sql"] = remote_store.CREATE_TABLE_SQL
+    st["setup_guide"] = remote_store.SETUP_GUIDE
     return st
+
+
+@app.get("/api/profile/history")
+def api_profile_history(limit: int = Query(10, ge=1, le=50)):
+    """내 조건의 변경 이력 — **커밋 이력이 곧 백업이다.**
+
+    되돌릴 시점을 고르는 데 쓴다. 값 자체는 담지 않는다(목록만).
+    """
+    if not remote_store.enabled():
+        return {"available": False, "reason": "원격 저장소가 설정되지 않았습니다",
+                "history": []}
+    try:
+        return {"available": True,
+                "history": remote_store.history(profile.REMOTE_KEY, limit)}
+    except remote_store.RemoteError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+
+
+@app.post("/api/profile/restore")
+def api_profile_restore(payload: dict = Body(...)):
+    """지정한 시점의 내 조건으로 되돌린다.
+
+    복구도 **되읽어 확인**하는 저장 경로를 그대로 지난다 —
+    되돌렸다고 해놓고 실제로는 안 된 상황을 만들지 않는다.
+    """
+    sha = (payload or {}).get("sha")
+    if not sha:
+        raise HTTPException(status_code=400, detail="sha 가 필요합니다")
+    if not remote_store.enabled():
+        raise HTTPException(status_code=503,
+                            detail="원격 저장소가 설정되지 않았습니다")
+    try:
+        old = remote_store.get_at(profile.REMOTE_KEY, str(sha))
+        if old is None:
+            raise HTTPException(status_code=404,
+                                detail="그 시점에는 저장된 값이 없습니다")
+        res = profile.save(old)
+    except remote_store.RemoteError as e:
+        raise HTTPException(status_code=503, detail=f"복구하지 못했습니다 — {e}")
+    prof = res["profile"]
+    return {"restored": True, "from": sha, "profile": prof,
+            "derived": profile.derived(prof, today_kst())}
 
 
 @app.get("/api/profile/export")
@@ -546,9 +588,9 @@ def api_cron_refresh(token: str = Query(""), enrich: bool = Query(False)):
         raise HTTPException(status_code=404)
     started = _start_refresh(enrich, trigger="cron")
 
-    # 원격 DB 를 한 번 건드려 **휴면에 들어가지 않게** 한다.
-    # Supabase 무료 프로젝트는 일정 기간 활동이 없으면 일시중지되는데,
-    # 그러면 내 조건·즐겨찾기를 못 읽는다. 시간당 한 번이면 충분하다.
+    # 원격 저장소에 닿는지 같이 확인한다. GitHub 는 휴면이 없어서 깨울 필요는
+    # 없지만, 토큰이 만료되면 저장이 조용히 막히므로 **매시 확인해 둔다**
+    # (토큰 만료는 저장을 누르기 전까지 드러나지 않는 종류의 고장이다).
     db = remote_store.ping() if remote_store.enabled() else {"ok": None}
 
     return {"started": started,

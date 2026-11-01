@@ -13,12 +13,12 @@
 | 항목 | 상태 |
 |---|---|
 | 운영 배포 | **Live** — Render Free, GitHub `main` 자동 배포 |
-| 회귀 테스트 | **237개 전부 통과** (175 → 205 → 237) |
+| 회귀 테스트 | **242개 전부 통과** (175 → 205 → 237 → 242) |
 | 전체 검증 `verify.ps1` | **8단계 전부 통과** |
 | 배포 검증 `verify_deploy.py` | **9영역 전부 통과** (로컬 프로덕션 모드) |
 | 공고 수집 | **5개 수집원 전부 정상** · 508건 |
 | 판정 무회귀 | 동일 캐시·동일 기준일 대조 **일치** |
-| 내 조건·즐겨찾기 영속 | 코드 완료 · **Supabase 연결은 사용자 설정 대기** |
+| 내 조건·즐겨찾기 영속 | 코드 완료 · **GitHub 데이터 저장소 연결은 사용자 설정 대기** |
 
 ---
 
@@ -54,36 +54,55 @@ Render 무료 플랜은 **영구 디스크가 없다.** 재시작·슬립 해제
 
 ### 2.2 어떻게 풀었나
 
-외부에 작은 저장소를 하나 둔다. Supabase 무료 Postgres 를 **PostgREST(HTTP)** 로
-쓴다 — `psycopg`/`sqlalchemy` 같은 네이티브 의존성을 추가하지 않으려고
-(무료 인스턴스의 빌드 시간·메모리를 아낀다). **새 의존성 0개.**
+저장할 것은 **암호화 후 약 1.3KB**, 쓰기는 주 몇 회다. 이 정도에 전용 DB 를
+붙이면 계정·무료플랜 정책·휴면 규칙을 하나 더 떠안게 된다. 그래서 **이미 쓰고
+있는 GitHub** 에 둔다 (Contents API, 공식 REST).
+
+#### 왜 전용 DB 가 아닌가 (2026-11 조사)
+
+| | 판단 |
+|---|---|
+| Supabase | 무료는 **조직당 활성 2개**이고 그 두 자리를 SPACE OPS 가 쓰고 있다 |
+| Neon | Python 공식 경로가 psycopg TCP → 네이티브 의존성 증가. HTTP 경로는 JS 드라이버의 **비공식** 내부 규격이라 예고 없이 깨질 수 있다 |
+| Turso | **Supabase 에 인수**되어 무료 플랜의 장래가 불확실하다 |
+| Upstash | 무료 플랜의 내구성·휴면 정책이 문서에 명시돼 있지 않아 **유일본**을 두기엔 보증이 약하다 |
+| **GitHub** | 새 계정·새 무료플랜 불필요, 휴면 없음, **커밋 이력이 곧 백업**, 공식 REST, **새 의존성 0개** |
 
 ```
-home_radar_kv(k text primary key, v text, key_fp text, updated_at timestamptz)
-  k="profile"    내 조건      ← 암호화
-  k="bookmarks"  즐겨찾기     ← 암호화
+<데이터 전용 비공개 저장소>/
+  data/profile.json      내 조건      ← 암호화
+  data/bookmarks.json    즐겨찾기     ← 암호화
 ```
+
+파일 안은 봉투다: `{"v":1, "key_fp":"<키 지문>", "data":"<Fernet 토큰>"}`
+
+> ⚠ **코드 저장소와 다른 저장소를 쓴다.** Render 가 지켜보는 저장소에 쓰면
+> 저장할 때마다 재배포가 걸린다. 별도 저장소면 그 위험이 아예 없다.
 
 공고 캐시는 **여기 두지 않는다.** 공개 정보라 암호화할 이유가 없고 수백 건이라
-무료 용량·요청 수를 잡아먹는다. 캐시는 로컬 파일에 두고 없으면 다시 수집한다.
+저장소를 지저분하게 만든다. 캐시는 로컬 파일에 두고 없으면 다시 수집한다.
 
-**읽기 순서** 원격 DB → 로컬 파일 → `PROFILE_JSON` → 기본값
-**쓰기** 원격 DB + 로컬 파일. 원격이 켜져 있으면 **원격 성공이 곧 저장 성공**.
+**읽기 순서** 원격 저장소 → 로컬 파일 → `PROFILE_JSON` → 기본값
+**쓰기** 원격 + 로컬 파일. 원격이 켜져 있으면 **원격 성공이 곧 저장 성공**.
 
 ### 2.3 암호화 (`app/crypto.py`)
 
-HTTPS 는 전송구간만 지킨다. 그것만으로는 DB 안에 소득·자산이 평문으로 쌓인다.
-그래서 **앱에서 암호화한 뒤** 올린다. DB 는 의미를 모른다.
+HTTPS 는 전송구간만 지킨다. 그것만으로는 저장된 쪽에 소득·자산이 평문으로 쌓인다.
+그래서 **앱에서 암호화한 뒤** 올린다. GitHub 는 내용을 모른다.
 
-알고리즘을 직접 설계하지 않는다. 표준 라이브러리의 검증된 원시요소를
-교과서적으로 조합한다:
+**검증된 표준 구현을 쓴다** — `cryptography` 라이브러리의 **Fernet**:
 
 ```
-scrypt(ENCRYPTION_KEY) → 마스터 키
-레코드별 부분키 = HMAC-SHA256(master, "enc"/"mac" || nonce)
-암호화 = HMAC-SHA256 카운터 모드 키스트림과 XOR
-인증  = encrypt-then-MAC, 복호화 **전에** 태그 검증
+AES-128-CBC (암호화) + HMAC-SHA256 (인증) + encrypt-then-MAC
+버전 바이트·타임스탬프·IV 를 포함한 고정 형식, 복호화 전 태그 검증
+키 유도: scrypt(ENCRYPTION_KEY) → 32바이트 → urlsafe base64
 ```
+
+> 처음에는 표준 라이브러리만으로 같은 구조를 직접 조합했다(scrypt + HMAC
+> 카운터 모드 + encrypt-then-MAC). 구성 자체는 교과서적이었지만 **이름 있는
+> AEAD 가 아니었다.** 소득·자산을 다루는 이상 "검증된 표준 구현"이라고 말할
+> 수 있는 쪽이 낫다고 보고 Fernet 으로 옮겼다. 의존성 하나가 늘지만
+> 리눅스 휠이 있어 배포 빌드에는 영향이 없다.
 
 > ⚠ **`ENCRYPTION_KEY` 를 잃으면 저장된 내 조건을 복구할 수 없다.**
 > 비밀번호 관리자 등에 따로 보관할 것. 키를 바꾸면 기존 레코드를 못 읽는데,
@@ -98,7 +117,7 @@ scrypt(ENCRYPTION_KEY) → 마스터 키
 - 실패하면 `503` + 사유. 화면은 **창을 닫지 않고** 사유를 띄운다
   (닫아 버리면 입력을 잃고 저장된 줄 알게 된다)
 - 네트워크가 끊겨 결과를 모르면 성공으로 표시하지 않는다
-- 저장 성공 시 **어디에 보존됐는지**(원격 DB / 로컬 파일) 함께 알린다
+- 저장 성공 시 **어디에 보존됐는지**(원격 저장소 / 로컬 파일) 함께 알린다
 - 원격을 못 읽으면 로컬로 내려가되 **경고를 남긴다**
 
 ### 2.5 화면에서 보이는 것
@@ -107,51 +126,106 @@ scrypt(ENCRYPTION_KEY) → 마스터 키
 
 | 상태 | 표시 |
 |---|---|
-| 원격 DB + 암호화 | 초록 — 영구 보존 중, PC·아이폰 동기화됨 |
-| 원격 DB, 키 없음 | 노랑 — 암호화 못 해서 외부에 쓰지 않음 |
+| 원격 저장소 + 암호화 | 초록 — 영구 보존 중, PC·아이폰 동기화됨 |
+| 원격 저장소, 키 없음 | 노랑 — 암호화 못 해서 외부에 쓰지 않음 |
 | 임시 디스크 | 노랑 — 재시작 시 사라짐 + `PROFILE_JSON` 복사 버튼 |
 | 로컬 파일 | 표시 없음 (내 PC에서 쓰는 평소 상태) |
 
 '초기화' 버튼으로 저장된 조건을 지울 수 있다(확인을 받는다).
 
-### 2.6 Supabase 를 쓰려면 (사용자 조작)
+### 2.6 설정 방법 (사용자 조작)
 
-1. <https://supabase.com> 가입 → **New project**
-   (이름 아무거나, 리전 `Northeast Asia (Seoul)` 권장, DB 비밀번호는 안 써도 된다)
-2. 좌측 **SQL Editor** → 아래를 붙여 넣고 **Run**
-   ```powershell
-   # SQL 전문을 보려면:
-   .venv\Scripts\python.exe -c "from app import remote_store; print(remote_store.CREATE_TABLE_SQL)"
-   ```
-3. **Settings → API** 에서 두 값을 복사
-   - `Project URL` → `SUPABASE_URL`
-   - `service_role` (secret) → `SUPABASE_KEY`  ← **anon 키가 아니다**
-4. 암호화 키를 만든다
-   ```powershell
-   .venv\Scripts\python.exe -c "import secrets; print(secrets.token_urlsafe(32))"
-   ```
-5. Render 대시보드 → 서비스 → **Environment** 에 3개 추가 후 저장(자동 재배포)
-   `SUPABASE_URL` · `SUPABASE_KEY` · `ENCRYPTION_KEY`
-6. 확인
-   ```powershell
-   .venv\Scripts\python.exe scripts\verify_deploy.py https://home-radar-jx7i.onrender.com `
-       --password <APP_PASSWORD> --cron-token <CRON_TOKEN>
-   ```
-   9단계에서 `원격 저장소 설정됨 / 개인정보 암호화 켜짐 / DB 연결 확인` 이 OK 면 끝.
+**1) 데이터 전용 저장소를 만든다** — 코드 저장소와 **다른** 저장소여야 한다.
 
-> **무료 DB 제약**: 500MB · 2개 프로젝트. **7일간 활동이 없으면 일시중지**되는데,
-> 시간당 크론이 DB 를 한 번 건드리게 해 뒀으므로 멈추지 않는다
-> (`/api/cron/refresh` 가 `remote_store.ping()` 을 호출한다).
-> 백업은 Supabase 대시보드의 Database → Backups 에서 받는다(무료는 보존 기간이 짧다).
-> 우리 데이터는 작으므로 `/api/profile/export` 로 뽑아 두는 것도 유효한 백업이다.
+github.com → **New repository**
+
+| 항목 | 값 |
+|---|---|
+| 이름 | `home-radar-data` (아무 이름이나 가능) |
+| 공개 범위 | **Private** ← 반드시 비공개 |
+| 초기화 | **Add a README file 체크** ← `main` 브랜치가 생겨야 한다 |
+
+**2) 토큰을 만든다** — 그 저장소 하나에만 권한을 준다.
+
+github.com → Settings → Developer settings → Personal access tokens
+→ **Fine-grained tokens** → Generate new token
+
+| 항목 | 값 |
+|---|---|
+| Repository access | Only select repositories → `home-radar-data` |
+| Permissions | Repository permissions → **Contents → Read and write** |
+| Expiration | 원하는 기간 (만료되면 다시 만들어 교체) |
+
+**3) 암호화 키를 만든다**
+
+```powershell
+.venv\Scripts\python.exe -c "import secrets; print(secrets.token_urlsafe(32))"
+```
+
+**4) Render → 서비스 → Environment 에 3개 추가** (저장하면 자동 재배포)
+
+| 환경변수 | 값 |
+|---|---|
+| `GITHUB_REPO` | `<사용자명>/home-radar-data` |
+| `GITHUB_TOKEN` | 2)에서 만든 토큰 (`github_pat_...`) |
+| `ENCRYPTION_KEY` | 3)에서 만든 값 — **분실 시 복구 불가, 따로 보관** |
+
+**5) 확인**
+
+```powershell
+.venv\Scripts\python.exe scripts\verify_deploy.py https://home-radar-jx7i.onrender.com `
+    --password <APP_PASSWORD> --cron-token <CRON_TOKEN>
+```
+
+9단계에서 `원격 저장소 설정됨 / 개인정보 암호화 켜짐 / 저장소 연결 확인 /
+데이터 저장소가 비공개 / 브랜치 설정이 저장소와 맞음` 이 전부 OK 면 끝이다.
+
+설정 절차 전문은 코드 안에도 있다 (문서와 실제가 어긋나지 않게):
+
+```powershell
+.venv\Scripts\python.exe -c "from app import remote_store; print(remote_store.SETUP_GUIDE)"
+```
+
+> **제약**: GitHub API 는 인증 시 시간당 5,000요청. 우리는 30초 캐시를 두고
+> 하루 수백 건 수준이라 여유가 크다. 휴면·일시중지는 없다.
+> 토큰이 만료되면 저장이 막히는데, 매시 크론이 `ping()` 으로 연결을 확인하므로
+> 저장을 누르기 전에 드러난다.
 
 ---
 
-## 3. 저장소 선택을 바꾸고 싶다면
+## 3. 백업과 복구
 
-`app/remote_store.py` 의 `get` / `put` / `delete` / `ping` 네 함수만 바꾸면 된다.
-암호화·API·테스트·화면은 그대로 쓴다. Upstash Redis(REST)나 GitHub 저장소
-방식으로 갈아끼우는 데 그 파일 하나면 충분하다.
+백업은 **두 겹**이다. 둘은 서로를 대신하지 못한다.
+
+**① 커밋 이력 (자동)** — 저장할 때마다 커밋이 쌓인다. 별도 작업이 없다.
+
+```powershell
+.venv\Scripts\python.exe scripts\backup.py list            # 변경 이력
+.venv\Scripts\python.exe scripts\backup.py show <sha>      # 그 시점 값 보기
+.venv\Scripts\python.exe scripts\backup.py restore --sha <sha>
+```
+
+화면에서도 쓸 수 있다: `GET /api/profile/history`, `POST /api/profile/restore`.
+
+**② 로컬 파일 (수동)** — 저장소나 토큰을 잃는 상황까지 대비한다.
+
+```powershell
+.venv\Scripts\python.exe scripts\backup.py save
+.venv\Scripts\python.exe scripts\backup.py restore --file <파일>
+```
+
+> ⚠ 받아 둔 파일은 **평문**이다 — 생년·소득·자산이 그대로 들어 있다.
+> `*.backup.json` 은 `.gitignore` 에 있지만, 안전한 곳에 따로 보관할 것.
+
+삭제: `초기화` 버튼이나 `DELETE /api/profile` 은 현재 파일을 지운다.
+**커밋 이력에는 예전 암호문이 남는다** — 열쇠가 없으면 읽을 수 없지만,
+완전히 없애려면 그 데이터 저장소 자체를 삭제하면 된다.
+
+### 저장소를 또 바꾸고 싶다면
+
+`app/remote_store.py` 의 `get` / `put` / `delete` / `ping` 네 함수만 바꾸면 된다
+(Supabase → GitHub 전환도 그 파일 하나로 끝났다).
+암호화·API·테스트·화면은 그대로 쓴다.
 
 ---
 
@@ -332,13 +406,13 @@ LH 는 지역을 특정하지 못한 공고의 `CNP_CD_NM` 에 **`전국`** 을 
 |---|---|---|
 | 15분 접속 없음 | 인스턴스가 잠든다 | 다음 접속 30~60초. 크론이 매시 깨운다 |
 | 재배포·재시작 | 공고 캐시 소멸 | 기동 직후 자동 재수집 (손댈 것 없음) |
-| 재배포·재시작 | 내 조건·즐겨찾기 | **Supabase 연결 시 그대로 유지**. 아니면 소실 |
+| 재배포·재시작 | 내 조건·즐겨찾기 | **GitHub 저장소 연결 시 그대로 유지**. 아니면 소실 |
 | 비밀번호 변경 | 모든 기기 로그아웃 | 의도된 동작. 막으려면 `APP_SECRET` 고정 |
 | `APP_PASSWORD` 누락 | 서버가 안 뜸 | 의도된 동작 |
 | `ENCRYPTION_KEY` 분실 | **저장된 조건 복구 불가** | 따로 보관할 것 |
 | `ENCRYPTION_KEY` 변경 | 기존 레코드 못 읽음 | 앱이 오류로 알린다. 예전 키를 되돌리면 읽힌다 |
 | 공공 API 키 누락 | 그 수집원만 건너뜀 | 앱은 정상 동작 |
-| Supabase 7일 무활동 | 프로젝트 일시중지 | 시간당 크론이 DB 를 건드려 막는다 |
+| GitHub 토큰 만료 | 저장이 막힌다 | 매시 크론이 ping 으로 확인해 먼저 드러난다 |
 
 > **추천은 최종 청약 자격 확정이 아니다.** 미확인이 하나라도 있으면 절대
 > '추천'으로 확정하지 않는 안전장치가 그대로 살아 있다.
@@ -361,7 +435,7 @@ LH 는 지역을 특정하지 못한 공고의 `CNP_CD_NM` 에 **`전국`** 을 
 .venv\Scripts\python.exe scripts\funnel.py --source lh --list
 ```
 
-### 영속성 11단계 점검 (Supabase 연결 후)
+### 영속성 11단계 점검 (GitHub 저장소 연결 후)
 
 1 테스트 값 저장 → 2 서버에서 다시 조회 → 3 새로고침 → 4 로그아웃·재로그인 →
 5 서버 재시작 → 6 캐시 삭제 후 재시작 → 7 다른 브라우저 → 8 재배포 후 조회 →
@@ -375,8 +449,8 @@ LH 는 지역을 특정하지 못한 공고의 `CNP_CD_NM` 에 **`전국`** 을 
 ## 12. 파일 지도
 
 ```
-app/crypto.py            개인정보 암호화 (표준 라이브러리만)        [신규]
-app/remote_store.py      Supabase(PostgREST) 키-값 저장소          [신규]
+app/crypto.py            개인정보 암호화 (Fernet — 검증된 표준 구현)
+app/remote_store.py      GitHub(Contents API) 암호화 저장소
 app/auth.py              로그인·세션·크론 토큰
 app/profile.py           읽기 순서(원격→파일→환경변수)·저장 확인·초기화
 app/store.py             캐시 + 즐겨찾기(원격 연동)·수집원 소요시간
@@ -387,7 +461,8 @@ app/util.py              sido_in_text / NATIONWIDE
 app/sources/lh.py        LH (지역 보정)
 app/sources/youth.py     청년안심 (6페이지·공공/민간·최초/추가)
 app/web/index.html       화면 (출처 필터·저장 상태·초기화·PWA·모바일 분기)
-scripts/funnel.py        수집→표시 깔때기 진단                     [신규]
+scripts/funnel.py        수집→표시 깔때기 진단
+scripts/backup.py        백업·복구 (저장·이력·되돌리기)            [신규]
 scripts/verify_deploy.py 배포 검증 9영역
 scripts/verify.ps1       전체 검증 8단계
 tests/test_storage.py    암호화·원격 저장·영속성 32개              [신규]
@@ -398,9 +473,9 @@ tests/test_auth.py       로그인·세션 30개
 
 ## 13. 남은 제약 · 사용자 조작이 필요한 것
 
-- **Supabase 연결은 사용자가 해야 한다** (2.6). 그 전까지 내 조건·즐겨찾기는
+- **GitHub 데이터 저장소 연결은 사용자가 해야 한다** (2.6). 그 전까지 내 조건·즐겨찾기는
   재시작 시 사라지고, 화면이 그 사실을 노랑 경고로 알린다.
-- **유료 전환은 하지 않았다.** Render 영구 디스크(월 $7)를 붙이면 Supabase 없이도
+- **유료 전환은 하지 않았다.** Render 영구 디스크(월 $7)를 붙이면 외부 저장소 없이도
   모든 게 남는다 — `render.yaml` 의 `disk:` 주석을 풀고 `DATA_DIR=/var/data` 만
   주면 되고 **코드는 한 줄도 바뀌지 않는다.**
 - **무료 플랜의 슬립은 없앨 수 없다.** 크론으로 완화했을 뿐이라 아침에 처음 열 때
