@@ -259,8 +259,13 @@ def load_source_status() -> dict:
 
 
 def record_source(source_id: str, *, ok: bool, count: int = 0,
-                  error: str = "", note: str = "", skipped: bool = False) -> dict:
-    """수집원별 마지막 성공/실패 시각과 건수를 남긴다."""
+                  error: str = "", note: str = "", skipped: bool = False,
+                  seconds: Optional[float] = None) -> dict:
+    """수집원별 마지막 성공/실패 시각과 건수를 남긴다.
+
+    `seconds` 는 그 수집원이 걸린 시간이다. 무료 인스턴스에서 어디가 느린지
+    추측하지 않고 재서 판단하려고 같이 저장한다.
+    """
     store = load_source_status()
     at = now_kst().isoformat(timespec="seconds")
     rec = store.get(source_id) or {}
@@ -269,6 +274,8 @@ def record_source(source_id: str, *, ok: bool, count: int = 0,
     rec["last_count"] = count
     rec["note"] = note
     rec["skipped"] = skipped
+    if seconds is not None:
+        rec["last_seconds"] = seconds
     if skipped:
         rec["state"] = "건너뜀"
     elif ok:
@@ -288,8 +295,34 @@ def record_source(source_id: str, *, ok: bool, count: int = 0,
 
 
 # ---------------- 북마크 ----------------
+# 즐겨찾기는 '내가 고른 것'이라 공고 캐시와 성격이 다르다. 캐시는 사라져도
+# 다시 긁으면 되지만 즐겨찾기는 **되살릴 방법이 없다.** 그래서 원격 저장소가
+# 켜져 있으면 거기에 둔다 (암호화해서). 꺼져 있으면 예전처럼 로컬 파일만 쓴다.
+BOOKMARKS_REMOTE_KEY = "bookmarks"
+
+
 def load_bookmarks() -> list[str]:
+    from . import remote_store
+    if remote_store.enabled():
+        try:
+            marks = remote_store.get(BOOKMARKS_REMOTE_KEY)
+            if marks is not None:
+                return list(marks)
+        except remote_store.RemoteError:
+            # 원격이 잠깐 안 되면 로컬로 내려간다 — 즐겨찾기 때문에
+            # 화면 전체가 멎을 이유는 없다
+            pass
     return _read(BOOKMARKS_FILE, []) or []
+
+
+def save_bookmarks(marks: list[str]) -> dict:
+    """즐겨찾기를 저장한다. 원격이 켜져 있으면 원격 성공이 곧 저장 성공이다."""
+    from . import remote_store
+    _write(BOOKMARKS_FILE, marks)
+    if remote_store.enabled():
+        remote_store.put(BOOKMARKS_REMOTE_KEY, marks)   # 실패하면 예외
+        return {"persisted": "원격 DB", "count": len(marks)}
+    return {"persisted": "로컬 파일", "count": len(marks)}
 
 
 def toggle_bookmark(key: str) -> dict:
@@ -300,5 +333,6 @@ def toggle_bookmark(key: str) -> dict:
     else:
         marks.append(key)
         on = True
-    _write(BOOKMARKS_FILE, marks)
-    return {"key": key, "bookmarked": on, "count": len(marks)}
+    info = save_bookmarks(marks)
+    return {"key": key, "bookmarked": on, "count": len(marks),
+            "persisted": info["persisted"]}

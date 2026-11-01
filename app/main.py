@@ -33,7 +33,7 @@ from fastapi import Body, FastAPI, HTTPException, Query, Request
 from fastapi.responses import (FileResponse, JSONResponse, PlainTextResponse,
                                RedirectResponse, Response)
 
-from . import auth, collect, profile, store
+from . import auth, collect, profile, remote_store, store
 from .rules import (ASSET_GUIDE, MONTHLY_INCOME_BASE, RULE_SOURCES,
                     RULES_VERSION, SPECIAL_SUPPLY)
 from .sources import applyhome_detail
@@ -407,10 +407,16 @@ def api_rules():
 # ---------------- 내 조건 ----------------
 @app.get("/api/profile")
 def api_profile_get():
-    prof = profile.load()
+    info = profile.load_detailed()
+    prof = info["profile"]
     return {
         "profile": prof,
-        "saved": profile.exists(),
+        "saved": info["saved"],
+        # 어디서 읽었는지 · 무엇이 사용자가 실제로 저장한 값인지
+        "origin": info["origin"],
+        "provided": info["provided"],
+        "warning": info["warning"],
+        "storage": remote_store.status(),
         "derived": profile.derived(prof, today_kst()),
         "meta": {
             "sido": SIDO,
@@ -427,10 +433,49 @@ def api_profile_get():
 
 @app.put("/api/profile")
 def api_profile_put(payload: dict = Body(...)):
-    prof = profile.save(payload)
+    """내 조건 저장.
+
+    **저장에 실패하면 성공이라고 답하지 않는다.** 원격 저장소가 켜져 있으면
+    거기 쓰고 되읽어 확인한 뒤에야 성공을 돌려준다. 실패는 503 으로 알린다 —
+    화면이 '저장됨'이라고 띄워 놓고 재시작하면 사라지는 것이 가장 나쁘다.
+    """
+    try:
+        res = profile.save(payload)
+    except remote_store.RemoteError as e:
+        raise HTTPException(status_code=503, detail=f"저장하지 못했습니다 — {e}")
+    except OSError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    prof = res["profile"]
     return {"profile": prof, "saved": True,
+            "persisted": res["persisted"],
+            "verified": res.get("verified", False),
+            "warning": res.get("warning", ""),
+            "storage": remote_store.status(),
             "derived": profile.derived(prof, today_kst()),
             "deploy": _deploy_info()}
+
+
+@app.delete("/api/profile")
+def api_profile_delete():
+    """내 조건 초기화 — 저장된 값을 지우고 기본값으로 되돌린다."""
+    try:
+        res = profile.clear()
+    except remote_store.RemoteError as e:
+        raise HTTPException(status_code=503, detail=f"초기화하지 못했습니다 — {e}")
+    prof = res["profile"]
+    return {"cleared": res["cleared"], "profile": prof, "saved": False,
+            "derived": profile.derived(prof, today_kst())}
+
+
+@app.get("/api/storage")
+def api_storage():
+    """영속 저장소 상태 — **비밀값은 담지 않는다.**"""
+    st = remote_store.status()
+    st["ping"] = remote_store.ping() if st["enabled"] else {"ok": False,
+                                                            "reason": "미설정"}
+    st["table_sql"] = remote_store.CREATE_TABLE_SQL
+    return st
 
 
 @app.get("/api/profile/export")
@@ -452,12 +497,18 @@ def api_bookmark(payload: dict = Body(...)):
     key = (payload or {}).get("key")
     if not key:
         raise HTTPException(status_code=400, detail="key 가 필요합니다")
-    return store.toggle_bookmark(str(key))
+    try:
+        return store.toggle_bookmark(str(key))
+    except remote_store.RemoteError as e:
+        # 즐겨찾기도 되살릴 수 없는 값이다 — 저장 실패를 성공이라 하지 않는다
+        raise HTTPException(status_code=503,
+                            detail=f"즐겨찾기를 저장하지 못했습니다 — {e}")
 
 
 @app.get("/api/bookmarks")
 def api_bookmarks():
-    return {"keys": store.load_bookmarks()}
+    return {"keys": store.load_bookmarks(),
+            "storage": remote_store.status()}
 
 
 # ---------------- 수집 ----------------
@@ -485,9 +536,16 @@ def api_cron_refresh(token: str = Query(""), enrich: bool = Query(False)):
         # 토큰이 틀렸는지 미설정인지 구분해 주지 않는다
         raise HTTPException(status_code=404)
     started = _start_refresh(enrich, trigger="cron")
+
+    # 원격 DB 를 한 번 건드려 **휴면에 들어가지 않게** 한다.
+    # Supabase 무료 프로젝트는 일정 기간 활동이 없으면 일시중지되는데,
+    # 그러면 내 조건·즐겨찾기를 못 읽는다. 시간당 한 번이면 충분하다.
+    db = remote_store.ping() if remote_store.enabled() else {"ok": None}
+
     return {"started": started,
             "reason": "" if started else "이미 수집 중입니다",
-            "cache_age_hours": _cache_age_hours()}
+            "cache_age_hours": _cache_age_hours(),
+            "db": db}
 
 
 @app.get("/api/refresh/status")

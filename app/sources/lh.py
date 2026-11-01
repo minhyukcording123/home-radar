@@ -26,7 +26,7 @@ import httpx
 
 from .. import store
 from ..models import Notice
-from ..util import new_client, parse_date, to_sido
+from ..util import NATIONWIDE, new_client, parse_date, sido_in_text, to_sido
 from . import registry
 
 LIST_URL = "https://apis.data.go.kr/B552555/lhLeaseNoticeInfo1/lhLeaseNoticeInfo1"
@@ -253,6 +253,25 @@ def _detail_url(it: dict) -> str:
     return url
 
 
+def _region_of(it: dict) -> str:
+    """공고의 시도.
+
+    LH 는 지역을 특정하지 못한 공고의 CNP_CD_NM 에 '전국'을 넣는다. 그런데
+    그런 공고도 **제목에는 지역이 적혀 있는 경우가 많다.**
+
+        '[인천지역본부] 26년 2차 고령자 매입임대주택 …'                  → 인천
+        '장애인 자립특화형 주택 여기가 입주자 모집공고(경기도 김포시)'    → 경기
+
+    제목에서 찾을 수 있으면 그걸 쓴다. 못 찾으면 '전국'을 그대로 둔다 —
+    없는 지역을 지어내지 않는다. (관심지역 필터는 '전국'을 통과시킨다.)
+    """
+    region = to_sido(str(it.get("CNP_CD_NM", "")))
+    if region and region not in NATIONWIDE:
+        return region
+    found = sido_in_text(str(it.get("PAN_NM", "")))
+    return found or region
+
+
 def to_notice(it: dict) -> Notice:
     return Notice(
         source="LH",
@@ -260,7 +279,7 @@ def to_notice(it: dict) -> Notice:
         uid=str(it.get("PAN_ID", "")),
         title=str(it.get("PAN_NM", "")).strip(),
         category=classify(it),
-        region=to_sido(str(it.get("CNP_CD_NM", ""))),
+        region=_region_of(it),
         posted=parse_date(it.get("PAN_NT_ST_DT") or it.get("PAN_DT")),
         end=parse_date(it.get("CLSG_DT")),
         url=_detail_url(it),

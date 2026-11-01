@@ -33,6 +33,7 @@ from .checks import (ELIGIBILITY, FILTER, INFO, LEVEL_IGNORE, MET, NOTE,
                      SIGNAL, UNKNOWN, UNMET, Check, Verdict, filter_block,
                      missing)
 from .models import Notice
+from .util import NATIONWIDE
 from .rules import (ACCOUNT_FIRST_RANK, AGE_RULES, ASSET_GUIDE,
                     ASSET_GUIDE_SOURCE, RULE_SOURCES, SPECIAL_SUPPLY,
                     business_income_total, fmt_won, income_base, income_ratio,
@@ -162,8 +163,19 @@ def account_need(n: Notice, kind: str) -> str:
 
 # ---------------------------------------------------------------- 개별 조건
 def _check_region(n: Notice, prof: dict, v: Verdict) -> None:
+    """관심지역 필터.
+
+    '전국'은 지역 이름이 아니라 **지역을 특정하지 못했다는 표시**다.
+    LH 가 CNP_CD_NM 에 '전국'을 주는 공고가 있는데, 이걸 하나의 시도처럼
+    다루면 전국 대상 공고가 통째로 숨는다. 지역을 모르는 것을 두고
+    '내 지역이 아니다'라고 단정하지 않는다 — 숨기는 쪽이 더 위험하다.
+    """
     regions = prof.get("regions") or []
-    if regions and n.region and n.region not in regions:
+    if not regions or not n.region:
+        return
+    if n.region in NATIONWIDE:
+        return
+    if n.region not in regions:
         v.add(filter_block("관심 지역", f"{n.region} — 내가 고른 지역이 아니다"))
 
 

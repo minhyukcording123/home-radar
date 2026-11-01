@@ -42,6 +42,12 @@ def now_kst() -> datetime:
     return datetime.now(KST)
 
 
+# 수집원이 지역을 특정하지 못했을 때 쓰는 값들.
+# **이건 지역 이름이 아니다.** 관심지역 필터가 이걸 '전국이라는 시도'로 다루면
+# 전국 대상 공고가 숨겨져 버린다 (eligibility._check_region 참고).
+NATIONWIDE = {"전국", "전지역", "전체"}
+
+
 def to_sido(text: Optional[str]) -> str:
     """주소나 지역명에서 시도 2글자를 뽑아낸다."""
     if not text:
@@ -54,6 +60,36 @@ def to_sido(text: Optional[str]) -> str:
         if t.startswith(s) or s in t[:6]:
             return s
     return t.split()[0] if t.split() else ""
+
+
+def sido_in_text(text: Optional[str]) -> str:
+    """문자열 **어디에서든** 시도 이름을 찾는다. 못 찾으면 빈 문자열.
+
+    `to_sido()` 는 앞 6글자만 본다. 그래서 LH 공고처럼 지역이 뒤쪽이나
+    괄호 안에 있는 제목을 놓친다.
+
+        '장애인 자립특화형 주택 여기가 입주자 모집공고(경기도 김포시)'  → 경기
+        '[인천지역본부] 26년 2차 고령자 매입임대주택 예비입주자 모집'   → 인천
+        '경남 거창군 신원면 다자녀 매입임대주택 예비입주자 모집공고'     → 경남
+
+    **가장 앞에 나온 것**을 고른다. 공고 제목은 지역을 앞에 두는 편이고,
+    단지명에 우연히 섞인 지역명보다 앞쪽 표기가 신뢰할 만하다.
+    이 함수는 수집원이 지역을 못 준 경우의 **보조 수단**으로만 쓴다.
+    """
+    if not text:
+        return ""
+    t = str(text)
+    best_at, best = len(t) + 1, ""
+    # 정식 명칭(경기도·인천광역시…)을 먼저 본다 — 더 분명한 근거다
+    for full, short in _SIDO_ALIAS.items():
+        at = t.find(full)
+        if at != -1 and at < best_at:
+            best_at, best = at, short
+    for s in SIDO:
+        at = t.find(s)
+        if at != -1 and at < best_at:
+            best_at, best = at, s
+    return best
 
 
 # 구분자는 최대 2글자까지 허용한다.

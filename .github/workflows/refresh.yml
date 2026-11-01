@@ -58,9 +58,15 @@ jobs:
 
           # 2) 수집 요청. 토큰은 URL 쿼리로 가지만 HTTPS 라 전송 중에는 암호화된다.
           #    --fail-with-body 로 404(토큰 불일치)를 실패로 잡는다.
+          #
+          #    enrich=true 로 **상세 보강까지** 시킨다. 보강은 LH 상세·공급정보를
+          #    수십 번 호출해 2분 넘게 걸리는데, 아무도 기다리지 않는 크론이
+          #    해 두면 사용자가 화면을 열 때는 이미 채워져 있다.
+          #    (서버는 백그라운드 스레드로 돌리고 응답은 바로 준다.)
+          #    이미 받아 둔 상세는 캐시에서 재사용하므로 2회차부터는 훨씬 빠르다.
           echo "수집 요청…"
           body=$(curl -sS --max-time 120 --fail-with-body \
-                      -X POST "$APP_URL/api/cron/refresh?token=$CRON_TOKEN")
+                      -X POST "$APP_URL/api/cron/refresh?token=$CRON_TOKEN&enrich=true")
           echo "  응답: $body"
 
           # 토큰이 틀리면 404 가 오고 위에서 이미 실패한다.
