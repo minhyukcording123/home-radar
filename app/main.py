@@ -26,6 +26,7 @@ import threading
 import traceback
 from pathlib import Path
 
+from contextlib import asynccontextmanager
 from urllib.parse import parse_qs
 
 from fastapi import Body, FastAPI, HTTPException, Query, Request
@@ -167,11 +168,20 @@ def _maybe_auto_refresh(trigger: str) -> bool:
     return _start_refresh(enrich=False, trigger=trigger)
 
 
-@app.on_event("startup")
-def _on_startup() -> None:
-    """기동 직후 — 캐시가 없으면(임시 디스크라 날아갔으면) 바로 모으기 시작한다."""
+@asynccontextmanager
+async def _lifespan(_app: FastAPI):
+    """기동 직후 — 캐시가 없으면(임시 디스크라 날아갔으면) 바로 모으기 시작한다.
+
+    `@app.on_event("startup")` 는 FastAPI 가 폐기 예정으로 표시했다.
+    requirements 에 `<1.0` 상한을 걸어 뒀지만, 언젠가 사라질 API 를 쓰면
+    업그레이드가 막히므로 lifespan 으로 쓴다.
+    """
     if store.load_notices() is None:
         _start_refresh(enrich=False, trigger="startup")
+    yield
+
+
+app.router.lifespan_context = _lifespan
 
 
 # ---------------- 보안 헤더 · 로그인 울타리 ----------------
