@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 from datetime import date
 from pathlib import Path
@@ -26,7 +27,19 @@ from typing import Optional
 from .util import now_kst, today_kst
 
 ROOT = Path(__file__).resolve().parent.parent
-DATA = ROOT / "data"
+
+
+def data_dir() -> Path:
+    """캐시를 둘 폴더. `DATA_DIR` 환경변수가 있으면 그쪽을 쓴다.
+
+    호스팅에 영구 디스크를 붙이면 그 마운트 경로를 `DATA_DIR` 로 주면 끝이다 —
+    코드는 건드리지 않는다. 설정이 없으면 예전처럼 프로젝트 안의 `data/` 를 쓴다.
+    """
+    raw = (os.environ.get("DATA_DIR") or "").strip()
+    return Path(raw).expanduser() if raw else ROOT / "data"
+
+
+DATA = data_dir()
 DETAILS = DATA / "details"
 
 NOTICES_FILE = DATA / "notices.json"

@@ -1,5 +1,13 @@
-﻿fastapi>=0.115
-uvicorn[standard]>=0.30
-httpx>=0.27
-pyyaml>=6.0
-beautifulsoup4>=4.12
+# HOME RADAR 실행 의존성.
+#
+# 이 파일에 BOM(EF BB BF)이 들어가면 리눅스 배포에서 pip 가 첫 줄을
+# "﻿fastapi" 로 읽어 설치가 통째로 실패한다. UTF-8(BOM 없음)로 유지할 것.
+#
+# 상한을 메이저 버전에 걸어 둔다 — 자동 배포가 어느 날 갑자기
+# 깨지는 것을 막으면서 보안 패치는 계속 받는다.
+
+fastapi>=0.115,<1.0
+uvicorn[standard]>=0.30,<1.0
+httpx>=0.27,<1.0
+pyyaml>=6.0,<7.0
+beautifulsoup4>=4.12,<5.0

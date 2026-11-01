@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<title>HOME RADAR — 로그인</title>
+
+<!-- 홈 화면 설치 (로그인 화면에서 설치해도 아이콘·이름이 제대로 붙게) -->
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+<link rel="icon" href="/icons/icon-192.png" type="image/png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="HOME RADAR">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="theme-color" content="#eef1f4" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#13161a" media="(prefers-color-scheme: dark)">
+
+<style>
+:root{
+  color-scheme: light dark;
+  --bg:#eef1f4; --card:#ffffff; --line:#d8dee6; --line-strong:#b6bfc9;
+  --ink:#1b222b; --dim:#4d5765; --faint:#66707e;
+  --accent:#0b5cd6; --accent-ink:#0a4cb0; --on-accent:#fff;
+  --warn:#bf2727; --warn-bg:#fcebe9; --warn-line:#f2c6c1;
+  --sh:0 1px 2px rgba(16,24,40,.06), 0 2px 10px rgba(16,24,40,.08);
+  --safe-b: env(safe-area-inset-bottom, 0px);
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --bg:#13161a; --card:#1e242b; --line:#2e3741; --line-strong:#4a5663;
+    --ink:#e8ecf1; --dim:#aab4c0; --faint:#8d97a4;
+    --accent:#6ea3ff; --accent-ink:#9bbdff; --on-accent:#0d1626;
+    --warn:#f08484; --warn-bg:#3d2021; --warn-line:#5e3031;
+    --sh:0 1px 3px rgba(0,0,0,.5), 0 2px 10px rgba(0,0,0,.35);
+  }
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{
+  background:var(--bg); color:var(--ink);
+  font:15px/1.55 -apple-system,"Segoe UI",system-ui,"Malgun Gothic",sans-serif;
+  -webkit-text-size-adjust:100%;
+  display:flex; align-items:center; justify-content:center;
+  padding:24px 20px calc(24px + var(--safe-b));
+}
+.wrap{width:100%; max-width:380px}
+
+.brand{display:flex; flex-direction:column; align-items:center; gap:12px;
+  margin-bottom:26px; text-align:center}
+.brand img{width:76px; height:76px; border-radius:18px; box-shadow:var(--sh)}
+.brand h1{margin:0; font-size:19px; letter-spacing:-.3px}
+.brand h1 em{font-style:normal; color:var(--accent)}
+.brand p{margin:0; font-size:13px; color:var(--faint)}
+
+form{background:var(--card); border:1px solid var(--line); border-radius:14px;
+  padding:20px; box-shadow:var(--sh)}
+label{display:block; font-size:12.5px; font-weight:700; color:var(--dim);
+  margin-bottom:7px}
+input[type=password]{
+  width:100%; padding:12px 14px; font-size:16px;   /* 16px 미만이면 iOS 가 확대한다 */
+  border:1px solid var(--line); border-radius:10px;
+  background:var(--bg); color:var(--ink); min-height:48px;
+}
+input[type=password]:focus{outline:2px solid var(--accent); outline-offset:1px;
+  border-color:var(--accent)}
+button{
+  width:100%; margin-top:14px; padding:13px 16px; min-height:48px;
+  background:var(--accent); color:var(--on-accent); font-weight:700;
+  font-size:15px; border:0; border-radius:10px; cursor:pointer;
+}
+button:hover{background:var(--accent-ink)}
+button:active{transform:translateY(1px)}
+
+.err{display:none; margin-bottom:14px; padding:11px 13px; border-radius:10px;
+  background:var(--warn-bg); border:1px solid var(--warn-line);
+  color:var(--warn); font-size:13px; font-weight:600}
+.err.on{display:block}
+
+.note{margin-top:18px; font-size:12px; color:var(--faint); line-height:1.6;
+  text-align:center}
+.note b{color:var(--dim)}
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <div class="brand">
+    <img src="/icons/icon-192.png" alt="" width="76" height="76">
+    <h1>HOME <em>RADAR</em></h1>
+    <p>내 조건으로 걸러 본 청약 공고</p>
+  </div>
+
+  <form method="post" action="/login">
+    <div class="err" id="err" role="alert"></div>
+    <label for="pw">비밀번호</label>
+    <input type="password" id="pw" name="password" autocomplete="current-password"
+           inputmode="text" autofocus required
+           aria-describedby="why">
+    <button type="submit">열기</button>
+  </form>
+
+  <p class="note" id="why">
+    이 화면 안에는 <b>생년·소득·자산·주거정보</b>가 들어 있습니다.<br>
+    본인만 열 수 있도록 비밀번호로 잠겨 있습니다.
+  </p>
+</div>
+
+<script>
+/* 서버가 ?e=... 로 알려 준 실패 사유를 사람 말로 보여준다.
+   비밀번호가 틀렸는지, 잠겼는지만 알린다 — 그 이상은 알려 주지 않는다. */
+(function () {
+  const p = new URLSearchParams(location.search);
+  const e = p.get('e');
+  if (!e) return;
+  const box = document.getElementById('err');
+  if (e === 'locked') {
+    const secs = parseInt(p.get('s') || '0', 10);
+    const mins = Math.max(1, Math.ceil(secs / 60));
+    box.textContent = `로그인 시도가 너무 많습니다. 약 ${mins}분 뒤에 다시 시도하세요.`;
+  } else {
+    box.textContent = '비밀번호가 맞지 않습니다.';
+  }
+  box.classList.add('on');
+  // 주소창에서 오류 표시를 지운다 — 새로고침할 때마다 다시 뜨지 않게
+  history.replaceState(null, '', '/login');
+})();
+
+/* 홈 화면 앱에서도 껍데기가 바로 뜨도록 서비스워커를 등록해 둔다 */
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch(() => {});
+  });
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,35 @@
+{
+  "name": "HOME RADAR — 청약 공고 레이더",
+  "short_name": "HOME RADAR",
+  "description": "내 조건으로 걸러 본 청약·임대 공고. 추천은 참고용이며 실제 모집공고문을 반드시 확인해야 합니다.",
+  "lang": "ko",
+  "dir": "ltr",
+  "start_url": "/",
+  "scope": "/",
+  "id": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#eef1f4",
+  "theme_color": "#0b5cd6",
+  "categories": ["productivity", "finance", "utilities"],
+  "icons": [
+    {
+      "src": "/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}

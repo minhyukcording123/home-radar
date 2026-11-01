@@ -17,10 +17,30 @@ from datetime import date
 from pathlib import Path
 from typing import Optional
 
+from . import store
 from .util import parse_date, today_kst
 
 ROOT = Path(__file__).resolve().parent.parent
-PROFILE_FILE = ROOT / "profile.json"
+
+
+def profile_file() -> Path:
+    """내 조건을 저장할 파일 위치.
+
+    우선순위
+      1. `PROFILE_FILE` 환경변수 (경로를 직접 지정)
+      2. `DATA_DIR` 이 설정돼 있으면 그 안의 profile.json
+         (호스팅에 영구 디스크를 붙이면 자동으로 거기 쌓인다)
+      3. 프로젝트 루트의 profile.json — 로컬에서 쓰던 그대로
+    """
+    raw = (os.environ.get("PROFILE_FILE") or "").strip()
+    if raw:
+        return Path(raw).expanduser()
+    if (os.environ.get("DATA_DIR") or "").strip():
+        return store.data_dir() / "profile.json"
+    return ROOT / "profile.json"
+
+
+PROFILE_FILE = profile_file()
 
 DEFAULT: dict = {
     # ---- 기본 ----
@@ -100,13 +120,35 @@ _MIGRATE = {"monthly_income": "income_work"}
 
 
 def load() -> dict:
-    """PROFILE_JSON 환경변수 → profile.json → 기본값 순서."""
+    """저장된 profile.json → `PROFILE_JSON` 환경변수 → 기본값 순서.
+
+    **파일이 환경변수보다 우선이다.** 무료 호스팅은 디스크가 임시라서
+    환경변수를 '영구 보존용 씨앗'으로 쓰는데, 그걸 더 우선시하면 폰에서
+    조건을 고쳐도 저장이 안 먹는 것처럼 보인다. 그래서 이렇게 둔다.
+
+      - 환경변수만 있다  → 그 값으로 시작 (배포 직후, 재시작 직후)
+      - 폰에서 수정했다  → 파일이 생기고 그 값이 이긴다 (즉시 반영)
+      - 재시작했다       → 파일이 날아가고 다시 환경변수 값으로 돌아간다
+
+    마지막 줄이 무료 플랜의 한계다. `/api/profile/export` 로 지금 값을
+    환경변수에 복사해 두면 그 시점이 새 기준이 된다. 영구 디스크를 붙이거나
+    `DATA_DIR` 을 영구 경로로 주면 이 한계 자체가 없어진다.
+    """
     data: dict = {}
-    raw = os.environ.get("PROFILE_JSON")
-    if raw:
-        data = json.loads(raw)
-    elif PROFILE_FILE.exists():
-        data = json.loads(PROFILE_FILE.read_text(encoding="utf-8"))
+    path = profile_file()
+    if path.exists():
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            data = {}
+    if not data:
+        raw = os.environ.get("PROFILE_JSON")
+        if raw:
+            try:
+                data = json.loads(raw)
+            except json.JSONDecodeError:
+                # 환경변수가 깨져 있어도 서버는 떠야 한다 — 기본값으로 간다
+                data = {}
     return merge(data)
 
 
@@ -127,14 +169,26 @@ def merge(data: Optional[dict]) -> dict:
 
 def save(data: dict) -> dict:
     prof = merge(data)
-    PROFILE_FILE.write_text(
-        json.dumps(prof, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
+    path = profile_file()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(prof, ensure_ascii=False, indent=2),
+                   encoding="utf-8")
+    tmp.replace(path)      # 쓰다가 죽어도 반쪽짜리 파일이 남지 않게
     return prof
 
 
 def exists() -> bool:
-    return PROFILE_FILE.exists() or bool(os.environ.get("PROFILE_JSON"))
+    return profile_file().exists() or bool(os.environ.get("PROFILE_JSON"))
+
+
+def export_env_value() -> str:
+    """지금 조건을 `PROFILE_JSON` 환경변수에 넣을 수 있는 한 줄 JSON 으로.
+
+    무료 플랜(임시 디스크)에서 설정을 영구 보존하는 통로다 —
+    화면에서 복사해 호스팅 대시보드의 환경변수에 붙여 넣는다.
+    """
+    return json.dumps(load(), ensure_ascii=False, separators=(",", ":"))
 
 
 # ---------------------------------------------------------------- 파생값

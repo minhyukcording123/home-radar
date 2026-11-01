@@ -1,0 +1,98 @@
+# Render 배포 설정 (Blueprint).
+#
+# 저장소를 Render 에 연결하면 이 파일을 읽어 서비스를 만든다.
+# 대시보드에서 손으로 설정할 필요가 없다.
+#
+# 무료 플랜(plan: free)의 성질 — 알고 쓰는 게 중요하다:
+#   · 15분간 접속이 없으면 인스턴스를 재운다. 다음 접속은 깨우는 데 30~60초.
+#   · **영구 디스크가 없다.** 재시작·재배포하면 data/ 와 profile.json 이 사라진다.
+#     그래서 '내 조건'은 PROFILE_JSON 환경변수에 넣어 영구 보존하고,
+#     공고 캐시는 기동 직후 자동으로 다시 수집한다 (app/main.py 의 startup).
+#   · 한 달 750 인스턴스시간. 하루종일 깨워 두면 ~730시간이라 빠듯하므로
+#     크론은 하루 24번만 두드린다 (.github/workflows/refresh.yml).
+#
+# 나중에 유료(Starter, 월 $7)로 올려 영구 디스크를 붙이면,
+# 아래 disk 블록의 주석을 풀고 DATA_DIR 을 마운트 경로로 주면 끝이다.
+# 코드는 한 줄도 바꾸지 않는다.
+
+services:
+  - type: web
+    name: home-radar
+    runtime: python
+    plan: free
+    region: singapore          # 한국에서 가장 가까운 Render 리전
+    branch: main
+
+    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
+
+    # --proxy-headers / --forwarded-allow-ips:
+    #   Render 가 TLS 를 앞단에서 끝내고 앱에는 http 로 넘긴다. 이걸 안 주면
+    #   앱이 "지금 http 다"라고 판단해 Secure 쿠키를 붙이지 못한다.
+    startCommand: >-
+      uvicorn app.main:app
+      --host 0.0.0.0
+      --port $PORT
+      --proxy-headers
+      --forwarded-allow-ips="*"
+
+    healthCheckPath: /healthz
+
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.13.4"
+
+      # 한국 공고를 다루므로 로그·시각 표기를 KST 로 맞춘다
+      - key: TZ
+        value: Asia/Seoul
+
+      - key: PYTHONUNBUFFERED       # 로그가 바로 보이게
+        value: "1"
+
+      # ---- 보안 ----
+      # 비밀번호 없이 뜨는 사고를 막는다. APP_PASSWORD 가 없으면 기동 실패한다.
+      - key: HR_REQUIRE_AUTH
+        value: "1"
+
+      # 로그인 비밀번호. sync:false = **대시보드에서 직접 입력**하고
+      # 저장소에는 값이 들어가지 않는다.
+      - key: APP_PASSWORD
+        sync: false
+
+      # 외부 스케줄러가 수집을 깨울 때 쓰는 토큰. 역시 대시보드에서 입력.
+      - key: CRON_TOKEN
+        sync: false
+
+      # ---- 공식 오픈API 키 (공공데이터포털 '일반 인증키(Decoding)') ----
+      # 비워 두면 해당 수집원만 '키 미설정'으로 건너뛴다. 앱은 정상 동작한다.
+      - key: LH_API_KEY
+        sync: false
+      - key: APPLYHOME_API_KEY
+        sync: false
+
+      # ---- 영속성 ----
+      # 임시 디스크임을 화면에 알려 '내 조건'을 영구 보존하도록 안내한다.
+      - key: HR_EPHEMERAL
+        value: "1"
+
+      # 내 조건(생년·소득·자산)의 영구 보존처. 대시보드에서 입력하고,
+      # 폰에서 조건을 고친 뒤 앱의 'PROFILE_JSON 값 복사' 로 갱신한다.
+      - key: PROFILE_JSON
+        sync: false
+
+      # 캐시가 이 시간보다 오래되면 화면을 열 때 조용히 다시 수집한다.
+      - key: HR_STALE_HOURS
+        value: "6"
+
+    # ---- 유료로 올릴 때만 (월 $7 Starter 이상) ----
+    # 아래 두 블록의 주석을 풀면 캐시·내 조건이 재배포에도 그대로 남는다.
+    #
+    # disk:
+    #   name: home-radar-data
+    #   mountPath: /var/data
+    #   sizeGB: 1
+    #
+    # 그리고 envVars 에 추가:
+    #   - key: DATA_DIR
+    #     value: /var/data
+    #   - key: HR_EPHEMERAL
+    #     value: "0"

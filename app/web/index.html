@@ -4,7 +4,22 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="light">
+<meta name="robots" content="noindex, nofollow">
 <title>HOME RADAR</title>
+
+<!-- 아이폰 홈 화면 설치 (PWA).
+     status-bar-style 은 default 로 둔다 — black-translucent 는 상태바 글자가
+     항상 흰색이라 라이트 테마에서 안 보인다. -->
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+<link rel="icon" href="/icons/icon-192.png" type="image/png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="HOME RADAR">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<!-- 이 앱의 테마는 시스템이 아니라 토글이 정한다. 그래서 media 를 붙이지 않고
+     applyTheme() 이 이 한 줄을 직접 갈아 끼운다. -->
+<meta name="theme-color" content="#eef1f4">
 <style>
 /* ============================================================
    HOME RADAR — 라이트 테마 기본.
@@ -452,7 +467,96 @@ html[data-theme="dark"] .toast{background:#e8ecf1;color:#15181d}
   .star{width:44px;height:44px}
   .links a.lnk{min-height:44px}
   details.more>summary{min-height:40px}
+
+  /* iOS 는 글자가 16px 미만인 입력칸을 누르면 **화면을 확대해 버린다.**
+     확대되면 되돌아오지 않아서 '내 조건'을 채우는 내내 가로 스크롤이 생긴다.
+     그래서 폰에서는 입력칸만 16px 로 키운다 (버튼·칩은 그대로 둔다). */
+  .filters select,.filters input[type=search],
+  .f input,.f select,.f textarea,
+  input[type=text],input[type=number],input[type=search],
+  input[type=password],input[type=date],select,textarea{
+    font-size:16px}
 }
+
+/* ============================================================
+   아이폰 (375 / 390 / 430px)
+   ------------------------------------------------------------
+   헤더가 한 줄에 안 들어간다. 375px 기준으로 재어 보면
+     'HOME RADAR'(~108) + 다크(~58) + 내 조건(~74) + 새로고침(~82)
+     + 간격(24) = 346 > 343(=375-좌우 패딩)  → 넘친다.
+   그래서 좁은 화면에서는
+     · 테마 버튼을 아이콘만 남기고 (58 → 44)
+     · 수집 시각(stamp)을 둘째 줄로 내린다
+   두 가지로 해결한다. 결과: 44+74+82+간격16+108 = 324 ≤ 343. 들어간다.
+   ============================================================ */
+@media(max-width:430px){
+  header{padding:6px 12px}
+  /* 홈 화면 앱(standalone)에서 상태바 영역만큼 띄운다 */
+  header{padding-top:max(6px, env(safe-area-inset-top, 0px))}
+  .hrow{flex-wrap:wrap; row-gap:1px; min-height:0}
+  /* stamp 를 품은 .grow 를 맨 뒤·한 줄 전체로 보내 둘째 줄을 만든다 */
+  .hrow>.grow{order:10; flex:1 0 100%}
+  .stamp{font-size:11px; padding-bottom:2px}
+  h1{font-size:15.5px}
+  #btn-theme .lbl{display:none}            /* 아이콘만 남긴다 */
+  #btn-theme{padding:8px 0; width:44px; justify-content:center}
+  #btn-theme .ic{font-size:16px; line-height:1}
+  .btn{padding:8px 11px; font-size:13px}
+
+  main{padding:12px; padding-bottom:calc(40px + var(--safe))}
+  section{margin-bottom:12px}
+  .stats{gap:8px}
+  .stat{padding:11px 12px 13px}
+  .stat .num{font-size:25px}
+  .card{padding:13px 13px}
+  .viewbar{padding:6px 0 8px}
+  .tabs{max-width:none}
+  .srcbar{padding:6px 10px}
+  /* 가로로 넘치는 것들은 자기 안에서만 스크롤하게 둔다 */
+  .fwrap{padding:9px 10px}
+}
+
+/* 아이폰 SE·13 mini 등 가장 좁은 축(375px 이하) — 한 번 더 조인다 */
+@media(max-width:380px){
+  h1{font-size:15px}
+  .btn{padding:8px 9px; font-size:12.5px}
+  .stat .num{font-size:23px}
+  main{padding:10px}
+}
+
+/* ---------- 홈 화면 앱(standalone)에서만 보이는 것들 ---------- */
+/* 설치 안내 배너는 브라우저로 열었을 때만 띄운다 */
+@media all and (display-mode: standalone){
+  #install-tip{display:none !important}
+}
+
+/* iOS 홈 화면 앱 — 당겨서 새로고침이 없으므로 아래 여백을 넉넉히 */
+@media all and (display-mode: standalone){
+  main{padding-bottom:calc(60px + var(--safe))}
+}
+
+/* ---------- 설치 안내 배너 ---------- */
+.tip{display:flex; gap:10px; align-items:flex-start;
+  background:var(--accent-bg); border:1px solid var(--accent);
+  color:var(--accent-ink); border-radius:var(--r-m);
+  padding:11px 13px; font-size:12.5px; line-height:1.6}
+.tip .ti{font-size:16px; line-height:1.3; flex:0 0 auto}
+.tip b{color:var(--accent-ink)}
+.tip .x{margin-left:auto; flex:0 0 auto; border:0; background:transparent;
+  color:var(--accent-ink); cursor:pointer; font-size:17px; line-height:1;
+  padding:4px 6px; min-height:32px}
+.tip kbd{background:var(--card); border:1px solid var(--line);
+  border-radius:5px; padding:1px 5px; font:inherit; font-weight:700}
+
+/* ---------- 영속성 경고 (무료 호스팅의 임시 디스크) ---------- */
+.warnbox{background:var(--chk-bg); border:1px solid var(--chk-line);
+  color:var(--chk); border-radius:var(--r-m); padding:11px 13px;
+  font-size:12.5px; line-height:1.65; margin-bottom:12px}
+.warnbox b{color:var(--chk)}
+.warnbox .row{display:flex; gap:8px; align-items:center; margin-top:9px;
+  flex-wrap:wrap}
+.warnbox code{background:var(--card); border:1px solid var(--line);
+  border-radius:5px; padding:1px 6px; font-size:11.5px; color:var(--ink)}
 </style>
 </head>
 <body>
@@ -468,6 +572,19 @@ html[data-theme="dark"] .toast{background:#e8ecf1;color:#15181d}
 </header>
 
 <main>
+  <!-- 아이폰 홈 화면 설치 안내 — 설치한 뒤(standalone)에는 CSS 가 감춘다.
+       '닫기'를 누르면 localStorage 에 기억해 다시 띄우지 않는다. -->
+  <section id="install-tip" hidden aria-label="홈 화면에 설치">
+    <div class="tip">
+      <span class="ti" aria-hidden="true">⌂</span>
+      <div>
+        <b>아이폰 홈 화면에 추가하면</b> 주소창 없이 앱처럼 열립니다.<br>
+        사파리 아래쪽 <kbd>공유</kbd> → <kbd>홈 화면에 추가</kbd> → <kbd>추가</kbd>
+      </div>
+      <button class="x" id="tip-x" aria-label="안내 닫기">×</button>
+    </div>
+  </section>
+
   <!-- 1행: KPI — 판정 요약 (가장 무거운 층) -->
   <section aria-label="판정 요약">
     <div class="stats" id="stats"></div>
@@ -550,9 +667,14 @@ html[data-theme="dark"] .toast{background:#e8ecf1;color:#15181d}
     <div class="dh"><h2>내 조건</h2><div class="grow"></div>
       <button class="btn" value="cancel" type="submit">닫기</button></div>
     <div class="db">
+      <!-- 임시 디스크(무료 호스팅)에서만 보이는 영속성 안내 -->
+      <div class="warnbox" id="persist-warn" hidden></div>
+
       <div class="hint" style="margin-top:0">
-        <b>입력한 값은 이 컴퓨터의 <code>profile.json</code> 에만 저장된다.</b>
-        외부로 보내지 않고 Git 에도 올라가지 않는다(.gitignore).
+        <b>입력한 값은 내 서버 안에만 저장된다.</b>
+        제3자 서비스로 보내지 않고 Git 에도 올라가지 않는다(.gitignore).
+        외부 주소로 열 때는 로그인 뒤에만 보이고, 응답에 <code>no-store</code> 가
+        붙어 중간 캐시에 남지 않는다.
         정보가 비어 있으면 그 조건은 <b>'미확인'</b>이 되고, 미확인이 하나라도 있으면
         <b>절대 '추천'으로 확정하지 않는다.</b>
       </div>
@@ -695,6 +817,7 @@ html[data-theme="dark"] .toast{background:#e8ecf1;color:#15181d}
       </fieldset>
     </div>
     <div class="df">
+      <button class="btn ghost" id="btn-logout" type="button" hidden>로그아웃</button>
       <span class="stamp grow" id="pmsg"></span>
       <button class="btn primary" id="btn-save" value="save" type="submit">저장</button>
     </div>
@@ -732,9 +855,17 @@ function applyTheme(t){
   THEME = t === 'dark' ? 'dark' : 'light';
   try { document.documentElement.setAttribute('data-theme', THEME); } catch (e) {}
   const b = $('#btn-theme');
+  const next = THEME === 'dark' ? '라이트' : '다크';
   b.setAttribute('aria-pressed', THEME === 'dark');
-  b.textContent = THEME === 'dark' ? '라이트' : '다크';
-  b.title = THEME === 'dark' ? '라이트 테마로 전환' : '다크 테마로 전환';
+  // 좁은 화면에서는 글자를 숨기고 아이콘만 남긴다 (.lbl 을 CSS 가 감춘다).
+  // 글자가 사라져도 읽히도록 aria-label 을 따로 붙인다.
+  b.innerHTML = `<span class="ic" aria-hidden="true">${
+    THEME === 'dark' ? '☀' : '☾'}</span><span class="lbl">${next}</span>`;
+  b.setAttribute('aria-label', `${next} 테마로 전환`);
+  b.title = `${next} 테마로 전환`;
+  // 상태바·브라우저 UI 색도 테마에 맞춘다 (홈 화면 앱에서 티가 난다)
+  const meta = document.querySelector('meta[name="theme-color"]:not([media])');
+  if (meta) meta.content = THEME === 'dark' ? '#13161a' : '#eef1f4';
 }
 function toggleTheme(){
   applyTheme(THEME === 'dark' ? 'light' : 'dark');
@@ -779,18 +910,88 @@ function fmtPriceOf(o){
 }
 
 /* ================= 조회 ================= */
+/* 세션이 끊기면(쿠키 만료·비밀번호 변경) API 가 401 을 준다 → 로그인 화면으로.
+   fetch 를 쓰는 모든 곳이 이 한 군데를 지나게 해서 빠뜨리는 곳이 없게 한다. */
+function bounceIfLoggedOut(res){
+  if (res && res.status === 401){ location.href = '/login'; return true; }
+  return false;
+}
+
+let LAST_LOAD = 0;      /* 마지막으로 화면을 채운 시각 — 복귀 시 갱신 판단에 쓴다 */
+
 async function loadView(){
+  LAST_LOAD = Date.now();
   try{
     const r = await fetch(`/api/view?include_closed=${$('#f-closed').checked}`);
+    if (bounceIfLoggedOut(r)) return;
     if (!r.ok) throw new Error('HTTP ' + r.status);
     VIEW = await r.json();
   }catch(err){
     $('#list').innerHTML = emptyBox('서버에 연결할 수 없습니다',
-      '로컬 서버(127.0.0.1:8777)가 꺼져 있거나 응답하지 않습니다.',
+      '네트워크가 끊겼거나 서버가 응답하지 않습니다. ' +
+      '무료 호스팅은 한동안 접속이 없으면 잠들었다가 깨어나는 데 ' +
+      '30초쯤 걸립니다 — 잠시 뒤 다시 시도해 보세요.',
       act('reload', '다시 시도', true));
     return;
   }
   render();
+  applyDeploy();
+  // 서버가 '오래된 캐시'를 보고 수집을 깨웠다면 끝날 때까지 지켜본다.
+  // 화면은 이미 기존 캐시로 채워져 있으므로 기다리는 느낌이 없다.
+  if (VIEW.refreshing) watchRefresh({quiet:true});
+}
+
+/* ---- 배포 환경에 따라 달라지는 안내 ---- */
+function applyDeploy(){
+  const d = (VIEW && VIEW.deploy) || {};
+  $('#btn-logout').hidden = !d.auth;
+
+  // 임시 디스크: 재시작하면 '내 조건'이 환경변수 값으로 되돌아간다.
+  // 숨기지 말고 분명히 알리고, 영구 보존하는 방법을 바로 옆에 둔다.
+  const warn = $('#persist-warn');
+  if (d.ephemeral && !d.data_dir_set){
+    warn.hidden = false;
+    warn.innerHTML = `
+      <b>이 서버는 재시작하면 저장 내용이 초기화된다.</b>
+      무료 플랜은 영구 디스크가 없어서, 여기서 고친 조건은
+      서버가 다시 뜰 때 <code>PROFILE_JSON</code> 환경변수 값으로 되돌아간다.
+      <br>조건을 다 맞췄으면 아래 버튼으로 복사해
+      호스팅 대시보드의 <code>PROFILE_JSON</code> 에 붙여 넣어 두면 영구 보존된다.
+      <div class="row">
+        <button class="btn slim" id="btn-export" type="button">
+          PROFILE_JSON 값 복사</button>
+        <span class="stamp" id="export-msg"></span>
+      </div>`;
+    $('#btn-export').onclick = exportProfile;
+  } else {
+    warn.hidden = true;
+  }
+}
+
+async function exportProfile(){
+  const msg = $('#export-msg');
+  msg.textContent = '만드는 중…';
+  try{
+    const r = await fetch('/api/profile/export');
+    if (bounceIfLoggedOut(r)) return;
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const { value } = await r.json();
+    let ok = false;
+    try { await navigator.clipboard.writeText(value); ok = true; } catch (e) {}
+    if (!ok){
+      // 클립보드 권한이 없으면(사파리에서 흔하다) 직접 고를 수 있게 보여준다
+      const ta = document.createElement('textarea');
+      ta.value = value;
+      ta.style.cssText = 'width:100%;height:84px;margin-top:8px;font-size:11px';
+      msg.after(ta); ta.select();
+      msg.textContent = '복사가 막혀 있습니다 — 아래 값을 직접 복사하세요';
+      return;
+    }
+    msg.textContent = '복사됨 · PROFILE_JSON 에 붙여 넣으세요';
+    toast('PROFILE_JSON 값을 복사했습니다');
+  }catch(err){
+    msg.textContent = '실패: ' + err.message;
+  }
 }
 
 function render(){
@@ -1507,22 +1708,45 @@ function renderTimeline(){
 
 /* ================= 새로고침 ================= */
 async function refresh(){
-  const btn = $('#btn-refresh');
   const r = await fetch('/api/refresh?enrich=true', {method:'POST'});
-  if (r.status === 409){ toast('이미 수집 중입니다'); return; }
-  btn.disabled = true; btn.textContent = '수집 중…';
+  if (bounceIfLoggedOut(r)) return;
+  if (r.status === 409){ toast('이미 수집 중입니다'); watchRefresh({quiet:true}); return; }
+  watchRefresh({quiet:false});
+}
+
+/* 수집이 끝날 때까지 지켜본다.
+   quiet = 서버가 알아서 깨운 수집(캐시가 오래됐거나 기동 직후).
+   사람이 누른 게 아니므로 완료 토스트를 조용히 줄인다. */
+function watchRefresh(opts){
+  const quiet = !!(opts && opts.quiet);
+  const btn = $('#btn-refresh');
+  if (!btn.dataset.label) btn.dataset.label = btn.textContent || '새로고침';
+  btn.disabled = true;
+  btn.textContent = quiet ? '자동 수집 중…' : '수집 중…';
   clearInterval(POLL);
   POLL = setInterval(async () => {
-    const st = await (await fetch('/api/refresh/status')).json();
+    let st;
+    try{
+      const r = await fetch('/api/refresh/status');
+      if (bounceIfLoggedOut(r)){ clearInterval(POLL); return; }
+      if (!r.ok) return;              // 잠깐 끊긴 것일 수 있다 — 다음 차례에 다시
+      st = await r.json();
+    }catch(e){ return; }
     if (st.running) return;
+
     clearInterval(POLL);
-    btn.disabled = false; btn.textContent = '새로고침';
+    btn.disabled = false;
+    btn.textContent = btn.dataset.label;
     if (st.error) toast('수집 실패: ' + st.error, 6000);
     else {
       const x = st.result || {};
-      toast(`수집 완료 — ${x.count ?? 0}건`
-        + (x.new_count ? ` · 새 공고 ${x.new_count}건` : '')
-        + (x.failed_sources?.length ? ` · 실패 ${x.failed_sources.join(',')}` : ''));
+      if (!quiet){
+        toast(`수집 완료 — ${x.count ?? 0}건`
+          + (x.new_count ? ` · 새 공고 ${x.new_count}건` : '')
+          + (x.failed_sources?.length ? ` · 실패 ${x.failed_sources.join(',')}` : ''));
+      } else if (x.new_count){
+        toast(`새 공고 ${x.new_count}건`);
+      }
     }
     loadView();
   }, 1500);
@@ -1712,6 +1936,57 @@ $('#pform').addEventListener('input', e => {
        'spouse_income_work','spouse_income_business','dual_income','marital',
        'real_estate']
       .includes(e.target.name)) showCalc();
+});
+
+/* ================= 홈 화면 앱(PWA) ================= */
+
+/* 홈 화면에서 연 상태인가 (iOS 는 navigator.standalone 으로만 알 수 있다) */
+function isStandalone(){
+  try{
+    return window.matchMedia('(display-mode: standalone)').matches
+        || window.navigator.standalone === true;
+  }catch(e){ return false; }
+}
+
+/* 서비스워커 — 껍데기만 캐시한다. 개인정보는 sw.js 가 건드리지 않는다. */
+if ('serviceWorker' in navigator){
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch(() => {});
+  });
+}
+
+/* 설치 안내 — 아직 설치 안 했고, 폰·태블릿 폭이고, 닫은 적 없을 때만 */
+(function initInstallTip(){
+  const dismissed = (() => {
+    try { return localStorage.getItem('hr-tip-install') === 'off'; }
+    catch(e){ return false; }
+  })();
+  if (dismissed || isStandalone() || window.innerWidth > 820) return;
+  $('#install-tip').hidden = false;
+  $('#tip-x').onclick = () => {
+    $('#install-tip').hidden = true;
+    try { localStorage.setItem('hr-tip-install', 'off'); } catch(e){}
+  };
+})();
+
+/* 로그아웃 — 세션 쿠키를 지우고, 기기에 남은 껍데기 캐시도 비운다 */
+$('#btn-logout').onclick = async () => {
+  try{
+    const reg = await navigator.serviceWorker?.getRegistration();
+    reg?.active?.postMessage('clear-cache');
+  }catch(e){}
+  location.href = '/logout';
+};
+
+/* 홈 화면 앱은 '탭을 닫는다'는 개념이 없어서 며칠씩 열려 있곤 한다.
+   다시 앞으로 올 때 어제 데이터가 떠 있으면 곤란하므로 조용히 다시 불러온다. */
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible' || !VIEW) return;
+  const n = new Date();
+  const todayStr = `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,'0')}`
+                 + `-${String(n.getDate()).padStart(2,'0')}`;
+  // 날짜가 넘어갔거나 10분 넘게 안 보고 있었으면 새로 받는다
+  if (VIEW.today !== todayStr || Date.now() - LAST_LOAD > 600000) loadView();
 });
 
 loadView();
