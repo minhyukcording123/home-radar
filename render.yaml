@@ -69,15 +69,19 @@ services:
       - key: APPLYHOME_API_KEY
         sync: false
 
-      # ---- 영속 저장소 (Supabase 무료 Postgres) ----
-      # 내 조건·즐겨찾기를 여기 둔다. 공고 캐시는 넣지 않는다(공개 정보라
-      # 암호화할 이유가 없고 무료 용량을 잡아먹는다).
+      # ---- 영속 저장소 (GitHub 비공개 저장소) ----
+      # 내 조건·즐겨찾기를 **코드 저장소가 아닌 별도 비공개 저장소**에 둔다.
+      # 코드 저장소에 쓰면 저장할 때마다 재배포가 걸리므로 반드시 분리한다.
+      # 공고 캐시는 넣지 않는다(공개 정보라 암호화할 이유가 없다).
       # 세 값이 모두 있어야 원격 저장이 켜진다. 없으면 로컬 파일로 되돌아간다.
-      - key: SUPABASE_URL
+      #
+      # 설정 방법 전문:
+      #   python -c "from app import remote_store; print(remote_store.SETUP_GUIDE)"
+      - key: GITHUB_REPO          # 예: minhyukcording123/home-radar-data
         sync: false
-      - key: SUPABASE_KEY          # service_role 키 — 서버에서만 쓴다
+      - key: GITHUB_TOKEN         # fine-grained PAT (Contents: Read and write)
         sync: false
-      # 개인정보를 DB에 넣기 전에 앱에서 암호화할 때 쓰는 열쇠.
+      # 개인정보를 올리기 전에 앱에서 암호화할 때 쓰는 열쇠 (Fernet).
       # **분실하면 저장된 내 조건을 되살릴 수 없다.** 따로 적어 보관할 것.
       - key: ENCRYPTION_KEY
         sync: false
@@ -88,7 +92,7 @@ services:
       - key: HR_EPHEMERAL
         value: "1"
 
-      # 원격 저장소를 쓰기 전의 임시 보존 수단. Supabase 를 붙였으면 비워도 된다.
+      # 원격 저장소를 쓰기 전의 임시 보존 수단. GitHub 저장소를 붙였으면 비워도 된다.
       - key: PROFILE_JSON
         sync: false
 

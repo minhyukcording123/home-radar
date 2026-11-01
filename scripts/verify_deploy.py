@@ -268,16 +268,33 @@ def main() -> int:
             st = r.json()
             on = bool(st.get("enabled"))
             if on:
-                check("원격 저장소 설정됨", True)
+                check("원격 저장소 설정됨", True,
+                      f"{st.get('backend')} · {st.get('repo')}")
                 check("개인정보 암호화 켜짐", bool(st.get("encrypted")),
                       "ENCRYPTION_KEY 미설정" if not st.get("encrypted") else
                       f"키 지문 {st.get('key_fingerprint')}")
-                check("DB 연결 확인", bool((st.get("ping") or {}).get("ok")),
-                      str((st.get("ping") or {}).get("reason", "")))
+                pg = st.get("ping") or {}
+                check("저장소 연결 확인", bool(pg.get("ok")),
+                      str(pg.get("reason", "")))
+                if pg.get("ok"):
+                    # 개인정보가 들어가므로 **비공개여야 한다**
+                    check("데이터 저장소가 비공개", pg.get("private") is True,
+                          "공개 저장소입니다 — 즉시 비공개로 바꾸세요"
+                          if pg.get("private") is False else "")
+                    # 코드 저장소에 쓰면 저장할 때마다 재배포가 걸린다
+                    check("코드 저장소와 분리됨",
+                          "home-radar-data" in (st.get("repo") or "")
+                          or (st.get("repo") or "").split("/")[-1] != "home-radar",
+                          f"repo={st.get('repo')}")
+                    # 브랜치가 실제와 다르면 저장이 404 로 막힌다
+                    dflt = pg.get("default_branch")
+                    check("브랜치 설정이 저장소와 맞음",
+                          not dflt or dflt == st.get("branch"),
+                          f"설정 {st.get('branch')} · 저장소 기본 {dflt}")
             elif https:
                 # 운영(HTTPS)에서 원격 저장소가 없으면 재시작 때 설정이 날아간다
                 check("원격 저장소 설정됨", False,
-                      "SUPABASE_URL/SUPABASE_KEY 미설정 — 재시작 시 "
+                      "GITHUB_REPO/GITHUB_TOKEN 미설정 — 재시작 시 "
                       "내 조건·즐겨찾기가 사라집니다")
             else:
                 # 로컬 개발에서는 원격 저장소가 없는 것이 정상이다
