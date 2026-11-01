@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 
 import httpx
@@ -244,6 +245,91 @@ def main() -> int:
               f"{r.status_code} {r.text[:80]}")
     else:
         print("       · --cron-token 미지정 — 정상 동작 확인은 건너뜁니다")
+
+    # ---------------------------------------------------------- 9. 영속 저장
+    section("9. 영속 저장소 · 내 조건 보존")
+    if not auth_on:
+        check("영속 저장 검사", True, "건너뜀 (로그인 없는 서버)")
+    else:
+        r = client.get(f"{base}/api/storage")
+        if r.status_code != 200:
+            check("/api/storage", False, f"{r.status_code}")
+        else:
+            st = r.json()
+            on = bool(st.get("enabled"))
+            if on:
+                check("원격 저장소 설정됨", True)
+                check("개인정보 암호화 켜짐", bool(st.get("encrypted")),
+                      "ENCRYPTION_KEY 미설정" if not st.get("encrypted") else
+                      f"키 지문 {st.get('key_fingerprint')}")
+                check("DB 연결 확인", bool((st.get("ping") or {}).get("ok")),
+                      str((st.get("ping") or {}).get("reason", "")))
+            elif https:
+                # 운영(HTTPS)에서 원격 저장소가 없으면 재시작 때 설정이 날아간다
+                check("원격 저장소 설정됨", False,
+                      "SUPABASE_URL/SUPABASE_KEY 미설정 — 재시작 시 "
+                      "내 조건·즐겨찾기가 사라집니다")
+            else:
+                # 로컬 개발에서는 원격 저장소가 없는 것이 정상이다
+                print("       · 원격 저장소 미설정 — 로컬이라 건너뜁니다")
+
+            # 응답에 **실제 키**가 섞이지 않았는지.
+            # 'service_role' 같은 낱말은 표 생성 SQL 주석에도 나오므로
+            # 낱말이 아니라 **키처럼 생긴 값**(JWT)을 찾는다.
+            blob = json.dumps(st, ensure_ascii=False)
+            leaked = re.search(r"eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}", blob)
+            check("저장소 상태에 실제 키가 섞이지 않음", not leaked,
+                  leaked.group(0)[:20] if leaked else "")
+
+        # ---- 저장 왕복 (기존 값을 덮어쓰지 않는다) ----
+        if args.password:
+            before = client.get(f"{base}/api/profile")
+            if before.status_code != 200:
+                check("내 조건 읽기", False, f"{before.status_code}")
+            else:
+                orig = before.json()["profile"]
+                origin = before.json().get("origin")
+                check("내 조건 읽기", True, f"출처: {origin}")
+
+                # remind_days 만 잠깐 바꿨다가 **반드시 되돌린다**
+                probe = dict(orig)
+                mark = 9 if orig.get("remind_days") != 9 else 8
+                probe["remind_days"] = mark
+                w = client.put(f"{base}/api/profile", json=probe)
+                saved = w.status_code == 200
+                check("내 조건 저장", saved,
+                      (w.json().get("persisted", "") if saved
+                       else w.text[:90]))
+                if saved:
+                    check("저장 위치 보고", bool(w.json().get("persisted")),
+                          w.json().get("persisted"))
+                    check("서버가 저장을 확인(verified)",
+                          bool(w.json().get("verified")))
+                    again = client.get(f"{base}/api/profile").json()["profile"]
+                    check("저장한 값이 서버에서 다시 읽힌다",
+                          again.get("remind_days") == mark,
+                          f"{again.get('remind_days')} (기대 {mark})")
+                    # 원복
+                    back = client.put(f"{base}/api/profile", json=orig)
+                    restored = (back.status_code == 200
+                                and client.get(f"{base}/api/profile")
+                                .json()["profile"].get("remind_days")
+                                == orig.get("remind_days"))
+                    check("원래 값으로 되돌림 (데이터 보존)", restored,
+                          "" if restored else "!! 수동 확인 필요 !!")
+
+            # 즐겨찾기 왕복 — 없는 키로 켰다 끈다 (실제 공고에 영향 없음)
+            probe_key = "__verify__:probe"
+            b1 = client.post(f"{base}/api/bookmark", json={"key": probe_key})
+            if b1.status_code == 200 and b1.json().get("bookmarked"):
+                check("즐겨찾기 저장", True, b1.json().get("persisted", ""))
+                keys = client.get(f"{base}/api/bookmarks").json().get("keys") or []
+                check("즐겨찾기가 서버에서 읽힌다", probe_key in keys)
+                b2 = client.post(f"{base}/api/bookmark", json={"key": probe_key})
+                gone = (b2.status_code == 200 and not b2.json().get("bookmarked"))
+                check("즐겨찾기 원복 (데이터 보존)", gone)
+            else:
+                check("즐겨찾기 저장", False, b1.text[:90])
 
     # ---------------------------------------------------------- 요약
     print("\n" + "=" * 58)
