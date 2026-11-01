@@ -443,12 +443,79 @@ _reference/              참고용 외부 저장소 (우리 코드 아님, gitig
 
 | 항목 | 저장 위치 | Git |
 |---|---|---|
-| 생년·소득·자산·세대 정보 | `profile.json` | `.gitignore` |
-| 수집 캐시·북마크·관측기록 | `data/` | `.gitignore` |
+| 생년·소득·자산·세대 정보 | `profile.json` (또는 `$DATA_DIR/profile.json`) | `.gitignore` |
+| 수집 캐시·북마크·관측기록 | `data/` (또는 `$DATA_DIR`) | `.gitignore` |
 
-- 서버는 **127.0.0.1 에만 바인딩**한다. 외부에서 접근할 수 없다.
+- 로컬에서는 서버가 **127.0.0.1 에만 바인딩**한다. 외부에서 접근할 수 없다.
 - 개인정보는 이 프로세스 밖으로 나가지 않는다. 외부 API 로 소득·자산을 보내지 않는다.
 - 환경변수 `PROFILE_JSON` 으로 넘기는 것도 된다.
+- **외부에 배포하면 127.0.0.1 울타리가 사라진다** → 아래 '외부 배포' 참고.
+
+---
+
+## 외부 배포 — 아이폰에서 쓰기
+
+PC 없이 폰으로 보려면 HTTPS 주소가 필요하다. 그 순간 생년·소득·자산이
+인터넷에 놓이므로, 배포 모드에서는 **로그인이 기본**이고 끌 수 없게 해 뒀다.
+
+### 한 번만 하는 준비
+
+1. GitHub 비공개 저장소를 만들고 `main` 브랜치를 올린다.
+2. [Render](https://render.com) 에 GitHub 로 로그인 → **New → Blueprint** →
+   그 저장소를 고른다. `render.yaml` 을 읽어 서비스가 자동으로 만들어진다.
+3. 대시보드 **Environment** 에 아래 값을 넣는다 (`sync: false` 항목들).
+
+| 환경변수 | 값 | 없으면 |
+|---|---|---|
+| `APP_PASSWORD` | 길고 추측 어려운 비밀번호 | **서버가 뜨지 않는다** |
+| `CRON_TOKEN` | 아무 긴 임의 문자열 | 주기 수집 입구가 닫힌다 |
+| `LH_API_KEY` | 일반 인증키(Decoding) | LH 수집만 건너뛴다 |
+| `APPLYHOME_API_KEY` | 일반 인증키(Decoding) | 청약홈 API 수집만 건너뛴다 |
+| `PROFILE_JSON` | 내 조건 한 줄 JSON | 기본값으로 시작한다 |
+
+4. GitHub 저장소 **Settings → Secrets → Actions** 에
+   `APP_URL`(배포 주소)과 `CRON_TOKEN`(3번과 같은 값)을 넣는다.
+   `.github/workflows/refresh.yml` 이 매시 공고를 갱신한다.
+
+### 검증
+
+```powershell
+python scripts/verify_deploy.py https://내주소.onrender.com `
+    --password <APP_PASSWORD> --cron-token <CRON_TOKEN>
+```
+
+로그인 전 차단, 보안 헤더, PWA 파일, 크론 입구까지 한 번에 확인한다.
+
+### 무료 플랜에서 알고 있어야 할 것
+
+- **15분간 접속이 없으면 잠든다.** 다음 접속은 깨우는 데 30~60초.
+  크론이 매시 두드려서 낮 동안은 대체로 깨어 있다.
+- **영구 디스크가 없다.** 재배포·재시작하면 `data/` 와 `profile.json` 이 사라진다.
+  - 공고 캐시 → 기동 직후 자동으로 다시 수집한다 (손댈 것 없음).
+  - 내 조건 → 화면의 **`PROFILE_JSON` 값 복사** 버튼으로 얻은 값을
+    대시보드 환경변수에 넣어 두면 그 값으로 복원된다.
+- 월 $7 Starter 로 올려 영구 디스크를 붙이면 둘 다 없어지는 문제다.
+  `render.yaml` 의 `disk:` 주석을 풀고 `DATA_DIR=/var/data` 만 주면 끝이고,
+  **코드는 한 줄도 바꾸지 않는다.**
+
+### 배포 모드에서 더 붙는 보호
+
+| 보호 | 어떻게 |
+|---|---|
+| 로그인 | `APP_PASSWORD` + HMAC 서명 세션 쿠키 (HttpOnly·SameSite=lax·Secure) |
+| 비밀번호 없이 기동 금지 | `HR_REQUIRE_AUTH=1` — 없으면 **기동 실패** |
+| 추측 차단 | IP당 10회 실패 시 10분 잠금 |
+| 외부 유출 경로 차단 | CSP `connect-src 'self'` — 외부 호스트 접속 자체가 막힌다 |
+| 중간 캐시 금지 | 모든 개인정보 응답에 `Cache-Control: no-store` |
+| 기기 캐시 금지 | 서비스워커가 `/api/*` 를 아예 건드리지 않는다 |
+| 색인 거부 | `robots.txt` 전면 `Disallow: /` |
+| 기타 | HSTS·nosniff·X-Frame-Options DENY·no-referrer, OpenAPI 문서 비활성화 |
+
+### 아이폰 홈 화면에 설치
+
+사파리로 주소를 열고 로그인 → 아래 **공유** → **홈 화면에 추가** → **추가**.
+주소창 없이 앱처럼 열리고, 아이콘·앱 이름·시작 화면이 붙는다.
+(크롬·파이어폭스에서는 설치 메뉴가 없다. **사파리로 열어야 한다.**)
 
 ---
 
