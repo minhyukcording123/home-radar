@@ -42,7 +42,11 @@ from .util import SIDO, now_kst, today_kst
 WEB = Path(__file__).resolve().parent / "web"
 ICONS = WEB / "icons"
 
-app = FastAPI(title="HOME RADAR", version="1.0.0",
+# 배포된 코드가 어느 판인지 /healthz 로 확인하기 위한 값.
+# 기능이 바뀌면 올린다 (배포가 반영됐는지 로그인 없이 보기 위해).
+APP_VERSION = "1.1.0"
+
+app = FastAPI(title="HOME RADAR", version=APP_VERSION,
               # 개인용 앱이라 공개 문서는 꺼 둔다 — 스키마가 곧 공격 지도다
               docs_url=None, redoc_url=None, openapi_url=None)
 
@@ -340,8 +344,13 @@ def robots():
 
 @app.get("/healthz", include_in_schema=False)
 def healthz():
-    """호스팅 헬스체크용. 개인정보를 담지 않는다 (공개 경로다)."""
-    return {"ok": True}
+    """호스팅 헬스체크용. 개인정보를 담지 않는다 (공개 경로다).
+
+    `version` 과 `rules_version` 을 같이 내보낸다 — 배포가 실제로 새 코드로
+    바뀌었는지 **로그인 없이** 확인할 수 있어야 하기 때문이다. 둘 다 소스에
+    박혀 있는 값이라 개인정보도 비밀값도 아니다.
+    """
+    return {"ok": True, "version": APP_VERSION, "rules_version": RULES_VERSION}
 
 
 # ---------------- 화면 ----------------

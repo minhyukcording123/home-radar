@@ -46,6 +46,8 @@ def main() -> int:
     ap.add_argument("--cron-token", default="", help="CRON_TOKEN")
     ap.add_argument("--timeout", type=float, default=90.0,
                     help="무료 플랜은 잠든 서버를 깨우는 데 30초 넘게 걸린다")
+    ap.add_argument("--expect-version", default="",
+                    help="배포가 이 버전으로 바뀌었는지 확인 (예: 1.1.0)")
     args = ap.parse_args()
     base = args.base.rstrip("/")
     https = base.startswith("https://")
@@ -58,7 +60,15 @@ def main() -> int:
     try:
         r = client.get(f"{base}/healthz")
         check("/healthz 200", r.status_code == 200, f"{r.status_code}")
-        check("/healthz 본문", r.json().get("ok") is True, r.text[:60])
+        body = r.json()
+        check("/healthz 본문", body.get("ok") is True, r.text[:60])
+        # 배포가 실제로 새 코드인지 로그인 없이 확인한다
+        check("배포 버전 표기", bool(body.get("version")),
+              f"version {body.get('version')} · 규칙 {body.get('rules_version')}")
+        if args.expect_version:
+            check(f"배포 버전이 {args.expect_version} 인가",
+                  body.get("version") == args.expect_version,
+                  f"실제 {body.get('version')}")
     except Exception as e:  # noqa: BLE001
         check("/healthz 접속", False, f"{type(e).__name__}: {e}")
         print("\n서버에 닿지 못했습니다. 주소와 배포 상태를 확인하세요.")
