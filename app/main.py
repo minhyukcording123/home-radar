@@ -44,7 +44,7 @@ ICONS = WEB / "icons"
 
 # 배포된 코드가 어느 판인지 /healthz 로 확인하기 위한 값.
 # 기능이 바뀌면 올린다 (배포가 반영됐는지 로그인 없이 보기 위해).
-APP_VERSION = "1.1.0"
+APP_VERSION = "1.2.0"
 
 app = FastAPI(title="HOME RADAR", version=APP_VERSION,
               # 개인용 앱이라 공개 문서는 꺼 둔다 — 스키마가 곧 공격 지도다
