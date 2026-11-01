@@ -72,7 +72,14 @@ Step "4. API 건강도 · 5. 정확성 불변식 · 6. 키 유출" {
     $LASTEXITCODE -eq 0
 }
 
-Step "7. 개인정보·비밀값이 git 에 없는지" {
+Step "7. 수집 → 표시 깔때기 (노출 누락 점검)" {
+    # 어디서 몇 건이 왜 빠지는지. 숫자가 갑자기 바뀌면 여기서 먼저 보인다.
+    & $py (Join-Path $PSScriptRoot 'funnel.py') 2>&1 |
+        ForEach-Object { Write-Host ("  " + $_) }
+    $LASTEXITCODE -eq 0
+}
+
+Step "8. 개인정보·비밀값이 git 에 없는지" {
     $ok = $true
     foreach ($p in @('.env', 'profile.json', 'data/')) {
         $tracked = git ls-files $p

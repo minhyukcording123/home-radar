@@ -66,8 +66,15 @@ def main() -> int:
         need(not bad_src, f"실패한 수집원 없음 {bad_src}")
 
         print("\n--- 판정 정확성 불변식 ---")
+        # verdict.checks 는 응답에서 뺐다 (unmet/unknown/met/info 와 내용이
+        # 똑같이 겹쳐 응답을 두 배로 불렸다). 네 갈래를 합치면 같은 집합이다.
+        def all_checks(r):
+            v = r["verdict"]
+            return [*v.get("unmet", []), *v.get("unknown", []),
+                    *v.get("met", []), *v.get("info", [])]
+
         bad = [(r["title"][:20], ch["name"]) for r in rows
-               for ch in r["verdict"]["checks"]
+               for ch in all_checks(r)
                if not ch["source"]["official"] and ch["status"] in ("충족", "불충족")]
         need(not bad, f"미확정 기준이 적격을 확정하지 않는다 (위반 {len(bad)})")
 
@@ -85,7 +92,14 @@ def main() -> int:
                if r["verdict"]["level"] == "제외" and not r["verdict"]["unmet"]]
         need(not bad, f"제외는 전부 사유가 있다 (위반 {len(bad)})")
 
-        newk = {r["key"] for r in v["alerts"]["new"]}
+        # 알림은 응답에서 **키 목록**으로 온다 (공고 전체를 두 번 싣지 않으려고).
+        # 공고 본문이 필요하면 buckets 쪽 rows 에서 키로 찾는다.
+        by_key = {r["key"]: r for r in rows}
+
+        def alert_rows(name):
+            return [by_key[k] for k in v["alerts"].get(name, []) if k in by_key]
+
+        newk = set(v["alerts"]["new"])
         basek = {r["key"] for r in rows if r["is_baseline"]}
         need(not (newk & basek),
              f"기준선 공고는 신규 알림에 없다 (겹침 {len(newk & basek)})")
@@ -106,12 +120,19 @@ def main() -> int:
         need(not bad, f"시작일 없이 '접수중'이라 하지 않는다 (위반 {len(bad)})")
 
         rd = v["stats"]["remind_days"]
-        bad = [r["key"] for r in v["alerts"]["closing"]
+        bad = [r["key"] for r in alert_rows("closing")
                if r["days_left"] is None or not (0 <= r["days_left"] <= rd)]
         need(not bad, f"마감 임박 알림이 0~{rd}일 이내 (위반 {len(bad)})")
 
-        bad = [r["key"] for r in v["alerts"]["opening"] if r["begin"] is None]
+        bad = [r["key"] for r in alert_rows("opening") if r["begin"] is None]
         need(not bad, f"접수 시작 알림에 시작일 없는 공고 없음 (위반 {len(bad)})")
+
+        # 알림 키가 전부 목록 안에 있는 공고를 가리키는지 (끊긴 참조 방지).
+        # 화면이 키로 공고를 찾으므로, 가리키는 대상이 없으면 알림이 빈다.
+        dangling = {name: [k for k in keys if k not in by_key]
+                    for name, keys in v["alerts"].items()}
+        dangling = {n: ks for n, ks in dangling.items() if ks}
+        need(not dangling, f"알림 키가 모두 목록의 공고를 가리킨다 ({dangling})")
 
         print("\n--- 인증키 유출 점검 ---")
         needles = set()

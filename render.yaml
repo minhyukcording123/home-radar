@@ -69,13 +69,26 @@ services:
       - key: APPLYHOME_API_KEY
         sync: false
 
-      # ---- 영속성 ----
-      # 임시 디스크임을 화면에 알려 '내 조건'을 영구 보존하도록 안내한다.
+      # ---- 영속 저장소 (Supabase 무료 Postgres) ----
+      # 내 조건·즐겨찾기를 여기 둔다. 공고 캐시는 넣지 않는다(공개 정보라
+      # 암호화할 이유가 없고 무료 용량을 잡아먹는다).
+      # 세 값이 모두 있어야 원격 저장이 켜진다. 없으면 로컬 파일로 되돌아간다.
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_KEY          # service_role 키 — 서버에서만 쓴다
+        sync: false
+      # 개인정보를 DB에 넣기 전에 앱에서 암호화할 때 쓰는 열쇠.
+      # **분실하면 저장된 내 조건을 되살릴 수 없다.** 따로 적어 보관할 것.
+      - key: ENCRYPTION_KEY
+        sync: false
+
+      # ---- 임시 디스크 안내 ----
+      # 원격 저장소가 켜지면 '내 조건'은 안전하므로 이 안내는 꺼도 된다.
+      # 공고 캐시는 여전히 임시 디스크라 재시작 시 다시 수집한다(자동).
       - key: HR_EPHEMERAL
         value: "1"
 
-      # 내 조건(생년·소득·자산)의 영구 보존처. 대시보드에서 입력하고,
-      # 폰에서 조건을 고친 뒤 앱의 'PROFILE_JSON 값 복사' 로 갱신한다.
+      # 원격 저장소를 쓰기 전의 임시 보존 수단. Supabase 를 붙였으면 비워도 된다.
       - key: PROFILE_JSON
         sync: false
 

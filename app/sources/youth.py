@@ -92,7 +92,13 @@ def from_json(it: dict) -> Optional[Notice]:
         end=end,
         url=urljoin(LIST_URL,
                     f"view.do?optn1={_s(it.get('optn1'))}&boardId={bid}&menuNo=400008"),
-        extra={"supplier": _s(it.get("optn3"))},
+        extra={
+            "supplier": _s(it.get("optn3")),
+            # 공공/민간과 최초/추가를 **구조화해서** 둔다.
+            # category 문자열만으로는 화면에서 가려내기 어렵다.
+            "youth_kind": _KIND.get(_s(it.get("optn2")), ""),    # 공공 | 민간
+            "youth_round": _ROUND.get(_s(it.get("optn5")), ""),  # 최초 | 추가
+        },
     )
 
 
@@ -101,7 +107,18 @@ def parse_json(body) -> list[Notice]:
     return [n for n in (from_json(it) for it in rows) if n]
 
 
-def collect(today: date, pages: int = 2) -> tuple[list[Notice], list[str]]:
+def collect(today: date, pages: int = 6) -> tuple[list[Notice], list[str]]:
+    """모집공고 게시판을 읽는다.
+
+    **pages 를 넉넉히 둬야 하는 이유**: 이 게시판은 '추가모집'이 압도적으로 많아
+    (실측 80건 중 73건) 최신 2페이지(20건)를 긁으면 전부 추가모집이고
+    **최초모집 공고가 통째로 빠진다.** 6페이지면 60건까지 덮어 최초모집이 들어온다.
+
+    공공/민간 구분: 요청에 `optn2=""` 를 보내 둘 다 받는다. 다만 2026-11-01
+    실측으로는 이 게시판에 **민간임대(공공지원민간임대)만 올라온다** — 80건 전부.
+    공공임대분은 여기 올라오지 않으므로, 0건일 때 '수집 실패'로 오해하지 않도록
+    아래에서 내역을 경고(정보)로 남긴다.
+    """
     warnings: list[str] = []
     out: list[Notice] = []
     seen: set[str] = set()
@@ -129,5 +146,24 @@ def collect(today: date, pages: int = 2) -> tuple[list[Notice], list[str]]:
                 break
             if p < pages:
                 time.sleep(POLITE_DELAY)
+
+    # 무엇이 몇 건 들어왔는지 남긴다 — '0건'이 수집 실패인지 원래 없는 것인지
+    # 구분할 수 있어야 한다.
+    kinds: dict[str, int] = {}
+    rounds: dict[str, int] = {}
+    for n in out:
+        k = (n.extra or {}).get("youth_kind") or "미상"
+        rd = (n.extra or {}).get("youth_round") or "미상"
+        kinds[k] = kinds.get(k, 0) + 1
+        rounds[rd] = rounds.get(rd, 0) + 1
+    if out:
+        warnings.append(
+            "[정보] 청년안심 수집: "
+            + " · ".join(f"{k} {c}건" for k, c in sorted(kinds.items()))
+            + " / " + " · ".join(f"{k} {c}건" for k, c in sorted(rounds.items())))
+        if not kinds.get("공공"):
+            warnings.append(
+                "[정보] 청년안심 공공임대 공고 0건 — 수집 실패가 아니라 "
+                "이 모집공고 게시판에 민간임대(공공지원민간임대)만 올라온다")
 
     return out, warnings

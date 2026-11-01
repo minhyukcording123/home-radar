@@ -12,6 +12,7 @@ store 에 남겨 화면에 그대로 보여준다 (= '원천 수집 오류 감�
 from __future__ import annotations
 
 import copy
+import time
 from datetime import date, timedelta
 from pathlib import Path
 from typing import Optional
@@ -40,7 +41,7 @@ DEFAULT_CONFIG = {
         "lh": {"enabled": True, "upp_types": ["05", "06", "13", "39"],
                "max_pages": 5, "detail_limit": 30, "supply_limit": 20},
         "sh": {"enabled": True, "pages": 3},
-        "youth": {"enabled": True, "pages": 2},
+        "youth": {"enabled": True, "pages": 6},
         "ish": {"enabled": False, "pages": 2},
     }
 }
@@ -217,17 +218,23 @@ def refresh(today: Optional[date] = None, enrich: bool = True,
             source_results[sid] = store.record_source(
                 sid, ok=False, skipped=True, note=info["blocked_by"])
             return
+        # 수집원별 소요 시간을 남긴다 — 무료 인스턴스에서 어디가 느린지
+        # 추측하지 않고 재서 고치기 위해.
+        t0 = time.monotonic()
         try:
             rows, warns = fn()
             all_notices.extend(rows)
             warnings.extend(warns)
             source_results[sid] = store.record_source(
                 sid, ok=True, count=len(rows),
+                seconds=round(time.monotonic() - t0, 2),
                 note=f"경고 {len(warns)}건" if warns else "")
         except Exception as e:  # noqa: BLE001 — 한 수집원 실패가 전체를 죽이지 않게
             msg = f"{type(e).__name__}: {e}"
             warnings.append(f"[{info.get('name', sid)}] 수집 실패: {msg}")
-            source_results[sid] = store.record_source(sid, ok=False, error=msg)
+            source_results[sid] = store.record_source(
+                sid, ok=False, error=msg,
+                seconds=round(time.monotonic() - t0, 2))
 
     ac = source_cfg(cfg, "applyhome")
     run("applyhome", lambda: applyhome_cal.collect(
@@ -249,7 +256,7 @@ def refresh(today: Optional[date] = None, enrich: bool = True,
     run("sh", lambda: sh.collect(
         today, pages=int(source_cfg(cfg, "sh").get("pages", 3))))
     run("youth", lambda: youth.collect(
-        today, pages=int(source_cfg(cfg, "youth").get("pages", 2))))
+        today, pages=int(source_cfg(cfg, "youth").get("pages", 6))))
 
     # 아직 수집기를 붙이지 않은 수집원 — 상태만 정직하게 남긴다.
     #   ish : robots.txt 가 AI 에이전트를 차단해 구현하지 않았다
@@ -459,6 +466,12 @@ def build_view(prof: dict, today: Optional[date] = None,
         # 공고 내용이 바뀐 것
         "revised": [r for r in actionable if r.get("revisions")],
     }
+
+    # 알림은 **키 목록만** 보낸다.
+    # 예전에는 공고 전체를 그대로 담았는데, 그 공고들은 이미 buckets 안에 있는
+    # 같은 객체라 응답의 47%(452KB)가 똑같은 내용의 중복이었다. 폰에서 셀룰러로
+    # 받을 때 응답 크기가 곧 체감 속도라 키만 보내고 화면이 찾아 쓰게 한다.
+    alerts = {name: [r["key"] for r in items] for name, items in alerts.items()}
 
     return {
         "ready": True,

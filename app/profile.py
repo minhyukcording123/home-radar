@@ -8,6 +8,21 @@ cheongyak-auto(MIT) 의 스키마에서 출발해 청약 자격 판정에 필요
   - 희망 최대 분양가를 넣었다
 
 profile.json 은 .gitignore 에 있다 — 생년·소득·자산이 들어가므로 커밋하지 않는다.
+
+저장 계층 (2026-11-01 추가)
+---------------------------
+Render 무료 플랜은 영구 디스크가 없어 파일만으로는 재시작을 못 버틴다.
+그래서 원격 저장소(`remote_store`)를 **첫 번째 자리**로 둔다.
+
+  읽기  원격 DB → 로컬 파일 → PROFILE_JSON 환경변수 → 기본값
+  쓰기  원격 DB + 로컬 파일 (원격이 켜져 있으면 원격 성공이 곧 저장 성공)
+
+원격이 켜져 있으면 PC 와 아이폰이 같은 레코드를 보므로 한쪽에서 고치면
+다른 쪽에도 바로 반영된다. 원격이 꺼져 있으면 예전 동작 그대로다.
+
+**실패를 성공이라고 말하지 않는다.** 원격 쓰기가 실패하면 save() 가 예외를
+던지고 화면은 실패를 표시한다 — '저장됐다'고 해놓고 재시작하면 사라지는 것이
+가장 나쁘다.
 """
 from __future__ import annotations
 
@@ -17,8 +32,10 @@ from datetime import date
 from pathlib import Path
 from typing import Optional
 
-from . import store
+from . import remote_store, store
 from .util import parse_date, today_kst
+
+REMOTE_KEY = "profile"
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -119,37 +136,68 @@ DEFAULT: dict = {
 _MIGRATE = {"monthly_income": "income_work"}
 
 
-def load() -> dict:
-    """저장된 profile.json → `PROFILE_JSON` 환경변수 → 기본값 순서.
+def _read_raw() -> tuple[dict, str, str]:
+    """저장된 원본과 출처를 찾는다.
 
-    **파일이 환경변수보다 우선이다.** 무료 호스팅은 디스크가 임시라서
-    환경변수를 '영구 보존용 씨앗'으로 쓰는데, 그걸 더 우선시하면 폰에서
-    조건을 고쳐도 저장이 안 먹는 것처럼 보인다. 그래서 이렇게 둔다.
+    돌려주는 값: (원본 dict, 출처 이름, 경고 문구)
+    출처는 "원격 DB" / "로컬 파일" / "환경변수" / "기본값".
 
-      - 환경변수만 있다  → 그 값으로 시작 (배포 직후, 재시작 직후)
-      - 폰에서 수정했다  → 파일이 생기고 그 값이 이긴다 (즉시 반영)
-      - 재시작했다       → 파일이 날아가고 다시 환경변수 값으로 돌아간다
-
-    마지막 줄이 무료 플랜의 한계다. `/api/profile/export` 로 지금 값을
-    환경변수에 복사해 두면 그 시점이 새 기준이 된다. 영구 디스크를 붙이거나
-    `DATA_DIR` 을 영구 경로로 주면 이 한계 자체가 없어진다.
+    원격을 읽다 실패하면 로컬로 내려가되 **경고를 남긴다.** 조용히 기본값으로
+    돌아가면, 사용자가 그 위에 저장을 눌렀을 때 원격의 진짜 값을 덮어쓴다.
     """
-    data: dict = {}
+    warn = ""
+    if remote_store.enabled():
+        try:
+            data = remote_store.get(REMOTE_KEY)
+            if data:
+                return data, "원격 DB", ""
+        except remote_store.RemoteError as e:
+            # 읽기 실패는 치명적이지 않다 — 화면은 떠야 한다. 대신 분명히 알린다.
+            warn = str(e)
+
     path = profile_file()
     if path.exists():
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
+            if data:
+                return data, "로컬 파일", warn
         except (json.JSONDecodeError, OSError):
-            data = {}
-    if not data:
-        raw = os.environ.get("PROFILE_JSON")
-        if raw:
-            try:
-                data = json.loads(raw)
-            except json.JSONDecodeError:
-                # 환경변수가 깨져 있어도 서버는 떠야 한다 — 기본값으로 간다
-                data = {}
+            pass
+
+    raw = os.environ.get("PROFILE_JSON")
+    if raw:
+        try:
+            data = json.loads(raw)
+            if data:
+                return data, "환경변수", warn
+        except json.JSONDecodeError:
+            # 환경변수가 깨져 있어도 서버는 떠야 한다 — 기본값으로 간다
+            pass
+
+    return {}, "기본값", warn
+
+
+def load() -> dict:
+    """내 조건을 읽는다: 원격 DB → 로컬 파일 → 환경변수 → 기본값.
+
+    원격이 켜져 있으면 그게 진실의 출처다 — PC 와 아이폰이 같은 값을 본다.
+    원격이 꺼져 있거나 읽히지 않으면 예전 순서(파일 → 환경변수)로 내려간다.
+    """
+    data, _, _ = _read_raw()
     return merge(data)
+
+
+def load_detailed() -> dict:
+    """화면이 '어디서 읽었는지'와 '무엇이 기본값인지'까지 알아야 할 때.
+
+    `provided` 는 **사용자가 실제로 저장한 키 목록**이다. 기본값과 저장값을
+    화면에서 구분해 보여주기 위해 쓴다 (안 채운 칸을 채운 것처럼 보이면 안 된다).
+    """
+    data, origin, warn = _read_raw()
+    prof = merge(data)
+    provided = sorted(k for k in (data or {}) if k in DEFAULT)
+    return {"profile": prof, "origin": origin, "warning": warn,
+            "provided": provided, "saved": origin != "기본값"}
 
 
 def merge(data: Optional[dict]) -> dict:
@@ -167,19 +215,63 @@ def merge(data: Optional[dict]) -> dict:
     return prof
 
 
+def _write_local(prof: dict) -> bool:
+    """로컬 파일에도 써 둔다 (원격이 잠깐 안 될 때의 보조)."""
+    try:
+        path = profile_file()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(path.suffix + ".tmp")
+        tmp.write_text(json.dumps(prof, ensure_ascii=False, indent=2),
+                       encoding="utf-8")
+        tmp.replace(path)      # 쓰다가 죽어도 반쪽짜리 파일이 남지 않게
+        return True
+    except OSError:
+        return False
+
+
 def save(data: dict) -> dict:
+    """내 조건을 저장한다.
+
+    원격이 켜져 있으면 **원격 저장에 성공해야 성공이다.** 실패하면
+    `remote_store.RemoteError` 가 그대로 올라가고 화면은 실패를 표시한다.
+    로컬 파일에도 함께 쓰지만, 임시 디스크라 그것만으로는 보존됐다고 할 수 없다.
+    """
     prof = merge(data)
+    local_ok = _write_local(prof)
+
+    if remote_store.enabled():
+        remote_store.put(REMOTE_KEY, prof)      # 실패하면 여기서 예외
+        return {"profile": prof, "persisted": "원격 DB",
+                "local_ok": local_ok, "verified": True}
+
+    if not local_ok:
+        raise OSError("내 조건을 저장하지 못했습니다 (파일 쓰기 실패)")
+    return {"profile": prof, "persisted": "로컬 파일",
+            "local_ok": True, "verified": True,
+            "warning": "원격 저장소가 설정되지 않아 서버 재시작 시 "
+                       "사라질 수 있습니다"}
+
+
+def clear() -> dict:
+    """내 조건을 지우고 기본값으로 되돌린다."""
+    removed = []
+    if remote_store.enabled():
+        remote_store.delete(REMOTE_KEY)         # 실패하면 예외
+        removed.append("원격 DB")
     path = profile_file()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(json.dumps(prof, ensure_ascii=False, indent=2),
-                   encoding="utf-8")
-    tmp.replace(path)      # 쓰다가 죽어도 반쪽짜리 파일이 남지 않게
-    return prof
+    if path.exists():
+        try:
+            path.unlink()
+            removed.append("로컬 파일")
+        except OSError:
+            pass
+    return {"cleared": removed, "profile": merge({})}
 
 
 def exists() -> bool:
-    return profile_file().exists() or bool(os.environ.get("PROFILE_JSON"))
+    """저장된 내 조건이 어딘가에 있는가 (원격 포함)."""
+    _, origin, _ = _read_raw()
+    return origin != "기본값"
 
 
 def export_env_value() -> str:

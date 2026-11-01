@@ -173,6 +173,17 @@ class Verdict:
         return (f"충족 {len(self.met)} · 확인 필요 {len(self.unknown)}"
                 + (f" · 불충족 {len(self.unmet)}" if self.unmet else ""))
 
+    @property
+    def has_unofficial(self) -> bool:
+        """판정 근거 중 **확정되지 않은 기준**이 섞여 있는가.
+
+        화면이 '공고문으로 반드시 확인' 주의를 띄울지 정하는 데 쓴다.
+        예전에는 화면이 `checks` 전체를 받아 직접 훑었는데, 그 배열은
+        unmet/unknown/met/info 와 내용이 똑같이 겹쳐서 응답을 두 배로 불렸다.
+        필요한 건 **불리언 하나**라 여기서 계산해 보낸다.
+        """
+        return any(not c.official for c in self.checks)
+
     def to_dict(self) -> dict:
         return {
             "level": self.level,
@@ -187,10 +198,11 @@ class Verdict:
                 UNKNOWN: len(self.unknown),
                 UNMET: len(self.unmet),
             },
-            "checks": [c.to_dict() for c in self.checks],
+            "has_unofficial": self.has_unofficial,
             "income": self.income,
             "asset": self.asset,
-            # 화면에서 바로 쓰도록 분리해 둔다
+            # 조건을 상태별로 나눠 보낸다. 넷을 합치면 (INFO 포함) checks 전체와
+            # 같아서, checks 를 따로 싣지 않는다 — 모바일에서 응답 크기가 곧 속도다.
             "unmet": [c.to_dict() for c in self.unmet],
             "unknown": [c.to_dict() for c in self.unknown],
             "met": [c.to_dict() for c in self.met],
